@@ -12,6 +12,7 @@ import { formatCustomResult, formatResults, runCustomTest, runTests } from './ru
 import { Storage } from './storage.js';
 import { findTutorial, formatRoadmap, formatTutorial, tutorials } from './tutorials.js';
 import type { Difficulty, Language, Message, MessageKind, Problem, ProgressState } from './types.js';
+import { packageVersion, wantsVersion } from './version.js';
 
 const helpText = formatHelp();
 const cliRunTimeoutMs = 5000;
@@ -1099,8 +1100,17 @@ function App({ workspace, clearOutput }: AppProps) {
 }
 
 const args = process.argv.slice(2);
+if (wantsVersion(args)) {
+  process.stdout.write(`${packageVersion()}\n`);
+  process.exit(0);
+}
+
 if (args.includes('--help') || args.includes('-h')) {
-  process.stdout.write(`LocalAlgo - 离线、消息流式算法练习 CLI\n\n用法：localalgo [workspace]\n\n${helpText}\n`);
+  process.stdout.write(
+    `LocalAlgo - 离线、消息流式算法练习 CLI\n\n` +
+    `用法：localalgo [选项] [workspace]\n\n` +
+    `选项：\n  -v, --version  显示版本号\n  -h, --help     显示帮助\n\n${helpText}\n`,
+  );
   process.exit(0);
 }
 

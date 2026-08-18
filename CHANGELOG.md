@@ -4,6 +4,16 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-18
+
+### Added
+
+- Add `localalgo --version` and `localalgo -v`.
+
+### Changed
+
+- Make the published npm installation the primary README setup path.
+
 ## [0.1.0] - 2026-08-18
 
 ### Added

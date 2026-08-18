@@ -1,8 +1,12 @@
 # LocalAlgo
 
+[![npm version](https://img.shields.io/npm/v/localalgo.svg)](https://www.npmjs.com/package/localalgo)
+[![CI](https://github.com/tiandada/localalgo/actions/workflows/ci.yml/badge.svg)](https://github.com/tiandada/localalgo/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/localalgo.svg)](LICENSE)
+
 一个离线、消息流式的算法练习 CLI。界面以 coding agent 为灵感：题面、编辑动作和判题结果按时间追加，不使用左右分栏，也不内置一套新的代码编辑器。
 
-> **项目状态：0.1.0 预览版。** 核心流程已经可用，当前主要在 Linux 上验证；
+> **项目状态：0.x 预览版。** 核心流程已经可用，当前主要在 Linux 上验证；
 > macOS 和 Windows 仍需要更多真实环境测试。
 
 ## 当前能力
@@ -27,10 +31,12 @@
 
 ## 安装与运行
 
-从 npm 发布后可以全局安装：
+推荐直接从 npm 全局安装：
 
 ```bash
 npm install --global localalgo
+localalgo --version
+
 mkdir -p ~/practice/localalgo
 cd ~/practice/localalgo
 localalgo
