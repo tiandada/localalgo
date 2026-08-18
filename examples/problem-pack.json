@@ -1,0 +1,34 @@
+{
+  "problems": [
+    {
+      "slug": "fibonacci-number",
+      "title": "斐波那契数",
+      "difficulty": "easy",
+      "tags": ["递归", "动态规划"],
+      "summary": "给定非负整数 n，返回第 n 个斐波那契数。F(0) = 0，F(1) = 1，并且 F(n) = F(n - 1) + F(n - 2)。",
+      "constraints": ["0 ≤ n ≤ 30"],
+      "hints": [
+        "直接递归会重复计算大量子问题。",
+        "只保存最近的两个结果即可把空间复杂度降到 O(1)。"
+      ],
+      "examples": [
+        { "input": "n = 4", "output": "3" }
+      ],
+      "functionName": "fibonacci",
+      "cppArgumentTypes": ["int"],
+      "starters": {
+        "python": "def fibonacci(n):\n    pass\n",
+        "cpp": "int fibonacci(int n) {\n    return 0;\n}\n"
+      },
+      "sampleTests": [
+        { "input": [4], "expected": 3 },
+        { "input": [0], "expected": 0 }
+      ],
+      "hiddenTests": [
+        { "input": [1], "expected": 1 },
+        { "input": [10], "expected": 55 },
+        { "input": [30], "expected": 832040 }
+      ]
+    }
+  ]
+}

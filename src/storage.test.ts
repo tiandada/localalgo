@@ -1,0 +1,135 @@
+import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { Storage } from './storage.js';
+
+test('persists progress in the selected workspace', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'localcode-storage-'));
+  const storage = new Storage(directory);
+  const state = {
+    activeProblem: 'two-sum',
+    activeLanguage: 'cpp' as const,
+    problems: {
+      'two-sum': {
+        status: 'solved' as const,
+        attempts: 1,
+        updatedAt: '2026-08-17T00:00:00.000Z',
+      },
+    },
+  };
+  await storage.save(state);
+  assert.deepEqual(await storage.load(), state);
+  const stored = JSON.parse(await readFile(storage.stateFile, 'utf8')) as { schemaVersion: number };
+  assert.equal(stored.schemaVersion, 2);
+});
+
+test('migrates a version 1 state envelope', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'localcode-storage-'));
+  const storage = new Storage(directory);
+  await storage.ensureDirectories();
+  const state = {
+    activeLanguage: 'python' as const,
+    problems: {
+      'two-sum': {
+        status: 'started' as const,
+        attempts: 2,
+        updatedAt: '2026-08-17T00:00:00.000Z',
+      },
+    },
+  };
+  await writeFile(storage.stateFile, JSON.stringify({ schemaVersion: 1, state }));
+  assert.deepEqual(await storage.load(), state);
+  await storage.save(state);
+  const stored = JSON.parse(await readFile(storage.stateFile, 'utf8')) as { schemaVersion: number };
+  assert.equal(stored.schemaVersion, 2);
+});
+
+test('persists wrong-answer review metadata', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'localcode-storage-'));
+  const storage = new Storage(directory);
+  const state = {
+    activeLanguage: 'cpp' as const,
+    problems: {
+      'two-sum': {
+        status: 'started' as const,
+        attempts: 1,
+        failedAttempts: 1,
+        lastAttemptAt: '2026-08-18T01:00:00.000Z',
+        updatedAt: '2026-08-18T01:00:00.000Z',
+      },
+    },
+  };
+  await storage.save(state);
+  assert.deepEqual(await storage.load(), state);
+});
+
+test('loads a legacy state file', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'localcode-storage-'));
+  const storage = new Storage(directory);
+  await storage.ensureDirectories();
+  const legacy = { activeLanguage: 'python', problems: {} };
+  await writeFile(storage.stateFile, JSON.stringify(legacy));
+  assert.deepEqual(await storage.load(), legacy);
+});
+
+test('migrates the old .localcode data directory', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'localalgo-storage-'));
+  const legacyDirectory = path.join(directory, '.localcode');
+  await mkdir(legacyDirectory);
+  const legacy = { activeLanguage: 'python', problems: {} };
+  await writeFile(path.join(legacyDirectory, 'state.json'), JSON.stringify(legacy));
+  const storage = new Storage(directory);
+  assert.deepEqual(await storage.load(), legacy);
+  assert.equal(storage.dataDirectory, path.join(directory, '.localalgo'));
+  assert.equal(storage.migratedFromLegacyDirectory, true);
+  assert.deepEqual(JSON.parse(await readFile(path.join(directory, '.localalgo', 'state.json'), 'utf8')), legacy);
+  await assert.rejects(readFile(path.join(legacyDirectory, 'state.json')), /ENOENT/);
+});
+
+test('recovers progress from backup when the main state is corrupted', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'localcode-storage-'));
+  const storage = new Storage(directory);
+  const first = {
+    activeLanguage: 'python' as const,
+    problems: {
+      'two-sum': {
+        status: 'started' as const,
+        attempts: 1,
+        updatedAt: '2026-08-18T00:00:00.000Z',
+      },
+    },
+  };
+  const second = {
+    ...first,
+    problems: {
+      'two-sum': {
+        ...first.problems['two-sum'],
+        attempts: 2,
+      },
+    },
+  };
+  await storage.save(first);
+  await storage.save(second);
+  await writeFile(storage.stateFile, '{broken json');
+  assert.deepEqual(await storage.load(), first);
+  assert.equal(storage.recoveredFromBackup, true);
+  await storage.save(first);
+  assert.deepEqual(await storage.load(), first);
+});
+
+test('imports and reloads a local problem pack', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'localcode-storage-'));
+  const source = path.join(directory, 'pack.json');
+  const example = await readFile(new URL('../examples/problem-pack.json', import.meta.url), 'utf8');
+  await writeFile(source, example);
+  const storage = new Storage(path.join(directory, 'workspace'));
+  const imported = await storage.importProblemPack(source, new Set());
+  assert.equal(imported[0]?.slug, 'fibonacci-number');
+  assert.equal((await storage.loadProblems())[0]?.title, '斐波那契数');
+  await assert.rejects(
+    storage.importProblemPack(source, new Set(['fibonacci-number'])),
+    /题目已存在/,
+  );
+});

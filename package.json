@@ -1,0 +1,64 @@
+{
+  "name": "localalgo",
+  "version": "0.1.0",
+  "description": "An offline, conversation-first coding practice CLI",
+  "license": "MIT",
+  "author": "LocalAlgo contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tiandada/localalgo.git"
+  },
+  "homepage": "https://github.com/tiandada/localalgo#readme",
+  "bugs": {
+    "url": "https://github.com/tiandada/localalgo/issues"
+  },
+  "keywords": [
+    "algorithms",
+    "cli",
+    "coding-practice",
+    "offline",
+    "terminal",
+    "tui"
+  ],
+  "type": "module",
+  "bin": {
+    "localalgo": "dist/cli.js"
+  },
+  "files": [
+    "dist/catalog.js",
+    "dist/cli.js",
+    "dist/commands.js",
+    "dist/composer.js",
+    "dist/curated-catalog.js",
+    "dist/generated-catalog.js",
+    "dist/problem-pack.js",
+    "dist/runner.js",
+    "dist/storage.js",
+    "dist/tutorials.js",
+    "dist/types.js",
+    "examples",
+    "README.md",
+    "CHANGELOG.md",
+    "NOTICE.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.tsx",
+    "start": "node dist/cli.js",
+    "test": "npm run build && node dist/catalog.test.js && node dist/curated-catalog.test.js && node dist/commands.test.js && node dist/composer.test.js && node dist/problem-pack.test.js && node dist/runner.test.js && node dist/storage.test.js && node dist/tutorials.test.js",
+    "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ink": "^6.3.1",
+    "react": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.1.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}
