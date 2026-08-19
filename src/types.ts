@@ -1,5 +1,6 @@
 export type Difficulty = 'easy' | 'medium' | 'hard';
 export type Language = 'python' | 'cpp';
+export type Locale = 'zh' | 'en';
 export type ArgumentType =
   | 'int'
   | 'long long'
@@ -55,6 +56,7 @@ export interface ProgressEntry {
 export interface ProgressState {
   activeProblem?: string;
   activeLanguage?: Language;
+  locale?: Locale;
   problems: Record<string, ProgressEntry>;
 }
 

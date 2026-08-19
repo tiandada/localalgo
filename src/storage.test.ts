@@ -22,7 +22,48 @@ test('persists progress in the selected workspace', async () => {
   await storage.save(state);
   assert.deepEqual(await storage.load(), state);
   const stored = JSON.parse(await readFile(storage.stateFile, 'utf8')) as { schemaVersion: number };
-  assert.equal(stored.schemaVersion, 2);
+  assert.equal(stored.schemaVersion, 3);
+});
+
+test('persists and reloads the interface locale', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'localalgo-storage-'));
+  const storage = new Storage(directory);
+  const state = {
+    locale: 'en' as const,
+    activeLanguage: 'python' as const,
+    problems: {},
+  };
+  await storage.save(state);
+  assert.deepEqual(await storage.load(), state);
+  const stored = JSON.parse(await readFile(storage.stateFile, 'utf8')) as {
+    schemaVersion: number;
+    state: { locale?: string };
+  };
+  assert.equal(stored.schemaVersion, 3);
+  assert.equal(stored.state.locale, 'en');
+});
+
+test('loads a version 2 state file without a locale', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'localalgo-storage-'));
+  const storage = new Storage(directory);
+  await storage.ensureDirectories();
+  const state = {
+    activeLanguage: 'python' as const,
+    problems: {},
+  };
+  await writeFile(storage.stateFile, JSON.stringify({ schemaVersion: 2, state }));
+  assert.deepEqual(await storage.load(), state);
+});
+
+test('rejects an invalid locale', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'localalgo-storage-'));
+  const storage = new Storage(directory);
+  await storage.ensureDirectories();
+  await writeFile(storage.stateFile, JSON.stringify({
+    schemaVersion: 3,
+    state: { locale: 'fr', problems: {} },
+  }));
+  await assert.rejects(storage.load(), /locale/);
 });
 
 test('migrates a version 1 state envelope', async () => {
@@ -43,7 +84,7 @@ test('migrates a version 1 state envelope', async () => {
   assert.deepEqual(await storage.load(), state);
   await storage.save(state);
   const stored = JSON.parse(await readFile(storage.stateFile, 'utf8')) as { schemaVersion: number };
-  assert.equal(stored.schemaVersion, 2);
+  assert.equal(stored.schemaVersion, 3);
 });
 
 test('persists wrong-answer review metadata', async () => {

@@ -12,6 +12,8 @@ test('completes a unique slash command', () => {
 test('completes problem and language arguments', () => {
   assert.equal(completeInput('/pick tw', slugs), '/pick two-sum ');
   assert.equal(completeInput('/lang c', slugs), '/lang cpp ');
+  assert.equal(completeInput('/locale z', slugs), '/locale zh ');
+  assert.equal(completeInput('/loc', slugs), '/locale ');
   assert.equal(completeInput('/topic 滑', slugs, ['数组', '滑动窗口']), '/topic 滑动窗口 ');
   assert.equal(completeInput('/learn 滑', slugs, [], ['数组', '滑动窗口']), '/learn 滑动窗口 ');
   assert.equal(completeInput('/next 双', slugs, [], ['数组', '双指针']), '/next 双指针 ');

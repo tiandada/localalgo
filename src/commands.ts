@@ -15,6 +15,7 @@ export const commands: CommandDefinition[] = [
   { name: 'pick', usage: '/pick <slug> [语言]', description: '选择题目并创建解答文件' },
   { name: 'random', usage: '/random [难度]', description: '随机选择一道题' },
   { name: 'lang', usage: '/lang [python|cpp]', description: '查看或切换当前语言' },
+  { name: 'locale', usage: '/locale [zh|en]', description: '查看或切换界面语言' },
   { name: 'show', usage: '/show', description: '重新显示当前题面' },
   { name: 'hint', usage: '/hint', description: '逐级显示当前题目的提示' },
   { name: 'edit', usage: '/edit', description: '使用 $VISUAL 或 $EDITOR 编辑代码' },
@@ -41,6 +42,7 @@ const argumentCandidates: Record<string, (context: CompletionContext) => string[
   learn: ({ tutorialTopics }) => tutorialTopics,
   next: ({ tutorialTopics }) => tutorialTopics,
   lang: () => ['python', 'cpp'],
+  locale: () => ['zh', 'en'],
   random: () => ['easy', 'medium', 'hard'],
 };
 

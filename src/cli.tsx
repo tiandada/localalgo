@@ -9,6 +9,7 @@ import { problems as builtInProblems } from './catalog.js';
 import { completeInput, formatHelp, suggestionsForInput } from './commands.js';
 import { deleteBackward, deleteForward } from './composer.js';
 import { formatCustomResult, formatResults, runCustomTest, runTests } from './runner.js';
+import { getLocale, localeLabel, setLocale, t } from './messages.js';
 import { Storage } from './storage.js';
 import { findTutorial, formatRoadmap, formatTutorial, tutorials } from './tutorials.js';
 import type { Difficulty, Language, Message, MessageKind, Problem, ProgressState } from './types.js';
@@ -462,6 +463,7 @@ function App({ workspace, clearOutput }: AppProps) {
     Promise.allSettled([storage.load(), storage.loadProblems()]).then(([stateResult, problemsResult]) => {
       if (stateResult.status === 'fulfilled') {
         setProgress(stateResult.value);
+        setLocale(stateResult.value.locale ?? 'zh');
         if (storage.migratedFromLegacyDirectory) append('system', '已将旧版 .localcode 数据迁移到 .localalgo。');
         if (storage.recoveredFromBackup) append('system', '检测到状态文件损坏，已从 state.json.bak 恢复进度。');
       }
@@ -823,6 +825,21 @@ function App({ workspace, clearOutput }: AppProps) {
           'success',
           `已切换到 ${languageLabel(language)}${solutionPath ? ` · ${path.relative(workspace, solutionPath)}` : ''}`,
         );
+        return;
+      }
+      if (command === 'locale') {
+        if (!args[0]) {
+          append('info', t('cli.locale.current', { label: localeLabel(getLocale()) }));
+          return;
+        }
+        const requested = args[0].toLowerCase();
+        if (requested !== 'zh' && requested !== 'en') {
+          append('error', t('cli.locale.unsupported'));
+          return;
+        }
+        setLocale(requested);
+        await persist({ ...progress, locale: requested });
+        append('success', t('cli.locale.switched', { label: localeLabel(requested) }));
         return;
       }
       if (command === 'show') {

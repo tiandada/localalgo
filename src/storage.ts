@@ -3,7 +3,7 @@ import path from 'node:path';
 import { parseProblemPack } from './problem-pack.js';
 import type { Language, Problem, ProgressState } from './types.js';
 
-const stateSchemaVersion = 2;
+const stateSchemaVersion = 3;
 
 function validateState(value: unknown): ProgressState {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -11,10 +11,11 @@ function validateState(value: unknown): ProgressState {
   }
   const record = value as Record<string, unknown>;
   const storedVersion = record.schemaVersion;
-  if (storedVersion !== undefined && storedVersion !== 1 && storedVersion !== stateSchemaVersion) {
+  if (storedVersion !== undefined && storedVersion !== 1 && storedVersion !== 2 && storedVersion !== stateSchemaVersion) {
     throw new Error(`不支持的状态版本：${String(storedVersion)}`);
   }
-  const rawState = storedVersion === 1 || storedVersion === stateSchemaVersion ? record.state : record;
+  const wrapped = storedVersion === 1 || storedVersion === 2 || storedVersion === stateSchemaVersion;
+  const rawState = wrapped ? record.state : record;
   if (!rawState || typeof rawState !== 'object' || Array.isArray(rawState)) {
     throw new Error('state 必须是对象');
   }
@@ -24,6 +25,9 @@ function validateState(value: unknown): ProgressState {
   }
   if (state.activeLanguage !== undefined && state.activeLanguage !== 'python' && state.activeLanguage !== 'cpp') {
     throw new Error('activeLanguage 必须是 python 或 cpp');
+  }
+  if (state.locale !== undefined && state.locale !== 'zh' && state.locale !== 'en') {
+    throw new Error('locale 必须是 zh 或 en');
   }
   if (!state.problems || typeof state.problems !== 'object' || Array.isArray(state.problems)) {
     throw new Error('problems 必须是对象');
@@ -69,6 +73,7 @@ function validateState(value: unknown): ProgressState {
     problems,
   };
   if (typeof state.activeProblem === 'string') result.activeProblem = state.activeProblem;
+  if (state.locale === 'zh' || state.locale === 'en') result.locale = state.locale;
   return result;
 }
 
