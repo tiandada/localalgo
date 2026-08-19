@@ -4,6 +4,8 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-19
+
 ### Added
 
 - Add `/locale [zh|en]` to switch the interface language; the choice is persisted in state schema version 3 (older state files still load).
