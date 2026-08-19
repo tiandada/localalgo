@@ -2,16 +2,26 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { t } from './messages.js';
 import type { Language, Problem, TestCase, TestResult } from './types.js';
 
 const resultMarker = '__LOCALALGO_RESULT__';
 const maxProcessOutputBytes = 1024 * 1024;
 
 function processErrorMessage(error: Error): string {
-  return error.name === 'AbortError' ? '执行已取消' : error.message;
+  return error.name === 'AbortError' ? t('runner.cancelled') : error.message;
 }
 
-const pythonHarness = String.raw`
+export function isCancelledResult(result: TestResult): boolean {
+  return result.failureKind === 'cancelled';
+}
+
+export function isCompilationFailure(result: TestResult): boolean {
+  return result.failureKind === 'compilation';
+}
+
+function pythonHarness(): string {
+  return String.raw`
 import importlib.util, json, sys, time, traceback
 
 class ListNode:
@@ -64,7 +74,7 @@ def normalize(value):
         seen = set()
         while value is not None:
             if id(value) in seen:
-                raise ValueError("返回的链表包含环")
+                raise ValueError(${JSON.stringify(t('runner.listCycle'))})
             seen.add(id(value))
             result.append(value.val)
             value = value.next
@@ -103,6 +113,7 @@ except Exception:
     print("${resultMarker}" + json.dumps({"error": traceback.format_exc()}, ensure_ascii=False))
     sys.exit(1)
 `;
+}
 
 function valuesEqual(actual: unknown, expected: unknown, unordered = false): boolean {
   if (Array.isArray(actual) && Array.isArray(expected)) {
@@ -130,7 +141,7 @@ async function runPythonCase(
       'python3',
       [
         '-c',
-        pythonHarness,
+        pythonHarness(),
         solutionPath,
         problem.functionName,
         JSON.stringify(testCase.input),
@@ -145,7 +156,7 @@ async function runPythonCase(
     const collect = (target: 'stdout' | 'stderr', chunk: string) => {
       outputBytes += Buffer.byteLength(chunk);
       if (outputBytes > maxProcessOutputBytes) {
-        outputError = `程序输出超过 ${maxProcessOutputBytes / 1024} KiB 限制`;
+        outputError = t('runner.outputLimit', { limit: maxProcessOutputBytes / 1024 });
         child.kill('SIGKILL');
         return;
       }
@@ -164,15 +175,32 @@ async function runPythonCase(
         expected: testCase.expected,
         durationMs: 0,
         error: processErrorMessage(error),
+        failureKind: error.name === 'AbortError' ? 'cancelled' : 'runtime',
       });
     });
     child.on('close', (_code, processSignal) => {
       if (signal?.aborted) {
-        resolve({ index, passed: false, input: testCase.input, expected: testCase.expected, durationMs: 0, error: '执行已取消' });
+        resolve({
+          index,
+          passed: false,
+          input: testCase.input,
+          expected: testCase.expected,
+          durationMs: 0,
+          error: t('runner.cancelled'),
+          failureKind: 'cancelled',
+        });
         return;
       }
       if (outputError) {
-        resolve({ index, passed: false, input: testCase.input, expected: testCase.expected, durationMs: 0, error: outputError });
+        resolve({
+          index,
+          passed: false,
+          input: testCase.input,
+          expected: testCase.expected,
+          durationMs: 0,
+          error: outputError,
+          failureKind: 'runtime',
+        });
         return;
       }
       const markerLine = stdout
@@ -186,7 +214,10 @@ async function runPythonCase(
           input: testCase.input,
           expected: testCase.expected,
           durationMs: timeoutMs,
-          error: processSignal ? `执行超时或被终止（${processSignal}）` : stderr.trim() || '程序没有返回可读取的结果',
+          error: processSignal
+            ? t('runner.terminated', { signal: processSignal })
+            : stderr.trim() || t('runner.noResult'),
+          failureKind: 'runtime',
         });
         return;
       }
@@ -206,6 +237,7 @@ async function runPythonCase(
           actual: payload.value,
           durationMs: payload.durationMs ?? 0,
           error: payload.error,
+          failureKind: payload.error ? 'runtime' : undefined,
         });
       } catch (error) {
         resolve({
@@ -214,7 +246,8 @@ async function runPythonCase(
           input: testCase.input,
           expected: testCase.expected,
           durationMs: 0,
-          error: `无法解析执行结果：${String(error)}`,
+          error: t('runner.parseFailed', { error: String(error) }),
+          failureKind: 'runtime',
         });
       }
     });
@@ -227,6 +260,8 @@ interface ProcessResult {
   code: number | null;
   signal: NodeJS.Signals | null;
   error?: string;
+  failureKind?: 'cancelled' | 'runtime';
+  errorSource?: 'spawn' | 'output';
 }
 
 async function runProcess(
@@ -248,7 +283,9 @@ async function runProcess(
     const collect = (target: 'stdout' | 'stderr', chunk: string) => {
       outputBytes += Buffer.byteLength(chunk);
       if (outputBytes > maxProcessOutputBytes) {
-        spawnError = `程序输出超过 ${maxProcessOutputBytes / 1024} KiB 限制`;
+        spawnError = t('runner.outputLimit', { limit: maxProcessOutputBytes / 1024 });
+        failureKind = 'runtime';
+        errorSource = 'output';
         child.kill('SIGKILL');
         return;
       }
@@ -259,14 +296,22 @@ async function runProcess(
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => collect('stdout', chunk));
     child.stderr.on('data', (chunk: string) => collect('stderr', chunk));
-    child.on('error', (error) => (spawnError = processErrorMessage(error)));
+    let failureKind: ProcessResult['failureKind'];
+    let errorSource: ProcessResult['errorSource'];
+    child.on('error', (error) => {
+      spawnError = processErrorMessage(error);
+      failureKind = error.name === 'AbortError' ? 'cancelled' : 'runtime';
+      errorSource = 'spawn';
+    });
     child.on('close', (code, processSignal) =>
       resolve({
         stdout,
         stderr,
         code,
         signal: processSignal,
-        error: signal?.aborted ? '执行已取消' : spawnError,
+        error: signal?.aborted ? t('runner.cancelled') : spawnError,
+        failureKind: signal?.aborted ? 'cancelled' : failureKind,
+        errorSource,
       }),
     );
   });
@@ -278,27 +323,27 @@ function toCppLiteral(
 ): string {
   if (type === 'int' || type === 'long long') {
     if (typeof value !== 'number' || !Number.isInteger(value)) {
-      throw new Error(`无法将 ${JSON.stringify(value)} 转换为 C++ ${type}`);
+      throw new Error(t('runner.cppConvert', { value: JSON.stringify(value), type }));
     }
     return type === 'long long' ? `${value}LL` : String(value);
   }
   if (type === 'double') {
     if (typeof value !== 'number' || !Number.isFinite(value)) {
-      throw new Error(`无法将 ${JSON.stringify(value)} 转换为 C++ double`);
+      throw new Error(t('runner.cppConvert', { value: JSON.stringify(value), type: 'double' }));
     }
     return Number.isInteger(value) ? `${value}.0` : String(value);
   }
   if (type === 'bool') {
-    if (typeof value !== 'boolean') throw new Error('C++ bool 参数必须是布尔值');
+    if (typeof value !== 'boolean') throw new Error(t('runner.cppBool'));
     return value ? 'true' : 'false';
   }
   if (type === 'string') {
-    if (typeof value !== 'string') throw new Error('C++ string 参数必须是字符串');
+    if (typeof value !== 'string') throw new Error(t('runner.cppString'));
     return `std::string(${JSON.stringify(value)})`;
   }
   if (type === 'vector<string>') {
     if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
-      throw new Error('C++ vector<string> 参数必须是字符串数组');
+      throw new Error(t('runner.cppStringVector'));
     }
     return `std::vector<std::string>{${value.map((item) => `std::string(${JSON.stringify(item)})`).join(', ')}}`;
   }
@@ -306,7 +351,7 @@ function toCppLiteral(
     if (!Array.isArray(value) || !value.every(
       (row) => Array.isArray(row) && row.every((item) => Number.isInteger(item)),
     )) {
-      throw new Error('C++ vector<vector<int>> 参数必须是二维整数数组');
+      throw new Error(t('runner.cppMatrix'));
     }
     const rows = value.map((row) => `std::vector<int>{${(row as number[]).join(', ')}}`);
     return `std::vector<std::vector<int>>{${rows.join(', ')}}`;
@@ -314,13 +359,13 @@ function toCppLiteral(
   if (type === 'TreeNode') {
     if (value === null) return 'nullptr';
     if (!Array.isArray(value) || !value.every((item) => item === null || Number.isInteger(item))) {
-      throw new Error('C++ TreeNode 参数必须是由整数和 null 构成的层序数组');
+      throw new Error(t('runner.cppTree'));
     }
     const nodes = value.map((item) => item === null ? 'std::nullopt' : `std::optional<int>{${item}}`);
     return `localalgo_tree(std::vector<std::optional<int>>{${nodes.join(', ')}})`;
   }
   if (!Array.isArray(value) || !value.every((item) => Number.isInteger(item))) {
-    throw new Error(`C++ ${type} 参数必须是整数数组`);
+    throw new Error(t('runner.cppIntVector', { type }));
   }
   const vector = `std::vector<int>{${value.join(', ')}}`;
   return type === 'ListNode' ? `localalgo_list(${vector})` : vector;
@@ -330,7 +375,7 @@ function buildCppHarness(problem: Problem, solutionPath: string, tests: TestCase
   const cases = tests
     .map((testCase) => {
       if (testCase.input.length !== problem.cppArgumentTypes.length) {
-        throw new Error(`题目 ${problem.slug} 的 C++ 参数类型定义不完整`);
+        throw new Error(t('runner.cppTypes', { slug: problem.slug }));
       }
       const args = testCase.input
         .map((value, index) => toCppLiteral(value, problem.cppArgumentTypes[index]!))
@@ -433,7 +478,7 @@ std::string localalgo_json(ListNode* node) {
         values.push_back(node->val);
         node = node->next;
     }
-    if (node) throw std::runtime_error("返回的链表过长或包含环");
+    if (node) throw std::runtime_error(${JSON.stringify(t('runner.listTooLong'))});
     return localalgo_json(values);
 }
 std::string localalgo_json(TreeNode* root) {
@@ -487,23 +532,29 @@ async function runCppTests(
       signal,
     );
     if (compilation.error || compilation.code !== 0) {
+      const cancelled = compilation.failureKind === 'cancelled';
+      const error = cancelled
+        ? compilation.error ?? t('runner.cancelled')
+        : compilation.error
+          ? compilation.errorSource === 'spawn'
+            ? t('runner.gppFailed', { error: compilation.error })
+            : compilation.error
+          : compilation.signal
+            ? t('runner.compileTerminated', { signal: compilation.signal })
+            : compilation.stderr.trim() || t('runner.compileFailed');
       return [{
         index: 0,
         passed: false,
         input: tests[0]?.input,
         expected: tests[0]?.expected,
         durationMs: 0,
-        error: compilation.error
-          ? (compilation.error === '执行已取消' || compilation.error.startsWith('程序输出超过'))
-            ? compilation.error
-            : `无法启动 g++：${compilation.error}`
-          : compilation.signal
-            ? `编译超时或被终止（${compilation.signal}）`
-            : `编译失败\n${compilation.stderr.trim()}`,
+        error,
+        failureKind: cancelled ? 'cancelled' : 'compilation',
       }];
     }
     const execution = await runProcess(executablePath, [], timeoutMs, signal);
     if (execution.error || execution.code !== 0) {
+      const cancelled = execution.failureKind === 'cancelled';
       return [{
         index: 0,
         passed: false,
@@ -511,8 +562,9 @@ async function runCppTests(
         expected: tests[0]?.expected,
         durationMs: timeoutMs,
         error: execution.error ?? (execution.signal
-          ? `执行超时或被终止（${execution.signal}）`
-          : execution.stderr.trim() || `程序退出码 ${execution.code}`),
+          ? t('runner.terminated', { signal: execution.signal })
+          : execution.stderr.trim() || t('runner.exitCode', { code: execution.code ?? 'unknown' })),
+        failureKind: cancelled ? 'cancelled' : 'runtime',
       }];
     }
     const lines = execution.stdout
@@ -527,7 +579,8 @@ async function runCppTests(
           input: testCase.input,
           expected: testCase.expected,
           durationMs: 0,
-          error: '程序没有返回可读取的结果',
+          error: t('runner.noResult'),
+          failureKind: 'runtime',
         };
       }
       try {
@@ -550,7 +603,8 @@ async function runCppTests(
           input: testCase.input,
           expected: testCase.expected,
           durationMs: 0,
-          error: `无法解析 C++ 执行结果：${String(error)}`,
+          error: t('runner.cppParseFailed', { error: String(error) }),
+          failureKind: 'runtime',
         };
       }
     });
@@ -575,7 +629,15 @@ export async function runTests(
   const results: TestResult[] = [];
   for (const [index, testCase] of tests.entries()) {
     if (signal?.aborted) {
-      results.push({ index, passed: false, input: testCase.input, expected: testCase.expected, durationMs: 0, error: '执行已取消' });
+      results.push({
+        index,
+        passed: false,
+        input: testCase.input,
+        expected: testCase.expected,
+        durationMs: 0,
+        error: t('runner.cancelled'),
+        failureKind: 'cancelled',
+      });
       break;
     }
     results.push(await runPythonCase(problem, solutionPath, testCase, index, timeoutMs, signal));
@@ -602,7 +664,8 @@ export async function runCustomTest(
       input,
       expected: undefined,
       durationMs: 0,
-      error: '程序没有返回可读取的结果',
+      error: t('runner.noResult'),
+      failureKind: 'runtime',
     };
   }
   return { ...result, passed: !result.error };
@@ -611,17 +674,18 @@ export async function runCustomTest(
 export function formatCustomResult(result: TestResult): string {
   if (result.error) {
     const errorLines = result.error.trim().split('\n');
-    if (errorLines[0] === '编译失败') {
-      const details = errorLines.slice(1);
-      const visible = details.length > 12
-        ? [...details.slice(0, 6), '…', ...details.slice(-6)]
-        : details;
-      return `编译失败\n${visible.map((line) => `  ${line}`).join('\n')}`;
+    if (isCompilationFailure(result)) {
+      const visible = errorLines.length > 12
+        ? [...errorLines.slice(0, 6), '…', ...errorLines.slice(-6)]
+        : errorLines;
+      return `${t('runner.compileFailed')}\n${visible.map((line) => `  ${line}`).join('\n')}`;
     }
-    return `执行失败\n${result.error.trim()}`;
+    return `${t('runner.executionFailed')}\n${result.error.trim()}`;
   }
   const serialized = JSON.stringify(result.actual, null, 2);
-  return `返回值\n${serialized ?? String(result.actual)}\n\n耗时 ${result.durationMs.toFixed(1)}ms`;
+  return `${t('runner.returnValue')}\n${serialized ?? String(result.actual)}\n\n${t('runner.duration', {
+    duration: result.durationMs.toFixed(1),
+  })}`;
 }
 
 function inlineValue(value: unknown): string {
@@ -642,10 +706,18 @@ function firstDifference(expected: unknown, actual: unknown, path = 'result'): s
     const sharedLength = Math.min(expectedCharacters.length, actualCharacters.length);
     for (let index = 0; index < sharedLength; index += 1) {
       if (expectedCharacters[index] !== actualCharacters[index]) {
-        return `${path}[${index}] 应为 ${inlineValue(expectedCharacters[index])}，实际为 ${inlineValue(actualCharacters[index])}`;
+        return t('runner.diffValue', {
+          path: `${path}[${index}]`,
+          expected: inlineValue(expectedCharacters[index]),
+          actual: inlineValue(actualCharacters[index]),
+        });
       }
     }
-    return `${path} 长度应为 ${expectedCharacters.length}，实际为 ${actualCharacters.length}`;
+    return t('runner.diffLength', {
+      path,
+      expected: expectedCharacters.length,
+      actual: actualCharacters.length,
+    });
   }
   if (Array.isArray(expected) && Array.isArray(actual)) {
     const sharedLength = Math.min(expected.length, actual.length);
@@ -653,9 +725,13 @@ function firstDifference(expected: unknown, actual: unknown, path = 'result'): s
       const difference = firstDifference(expected[index], actual[index], `${path}[${index}]`);
       if (difference) return difference;
     }
-    return `${path} 长度应为 ${expected.length}，实际为 ${actual.length}`;
+    return t('runner.diffLength', { path, expected: expected.length, actual: actual.length });
   }
-  return `${path} 应为 ${inlineValue(expected)}，实际为 ${inlineValue(actual)}`;
+  return t('runner.diffValue', {
+    path,
+    expected: inlineValue(expected),
+    actual: inlineValue(actual),
+  });
 }
 
 export function formatResults(results: TestResult[]): string {
@@ -664,30 +740,29 @@ export function formatResults(results: TestResult[]): string {
     if (result.passed) return `✓ case ${result.index + 1}  ${timing}`;
     if (result.error) {
       const errorLines = result.error.trim().split('\n');
-      if (errorLines[0] === '编译失败') {
-        const details = errorLines.slice(1);
-        const visible = details.length > 10
-          ? [...details.slice(0, 5), '…', ...details.slice(-5)]
-          : details;
+      if (isCompilationFailure(result)) {
+        const visible = errorLines.length > 10
+          ? [...errorLines.slice(0, 5), '…', ...errorLines.slice(-5)]
+          : errorLines;
         const excerpt = visible.map((line) => `    ${line}`).join('\n');
-        return `✗ 编译失败\n${excerpt}`;
+        return `✗ ${t('runner.compileFailed')}\n${excerpt}`;
       }
       return [
-        `✗ case ${result.index + 1}  Runtime Error`,
-        result.input ? labeledValue('input', result.input) : undefined,
-        `    error:\n${errorLines.map((line) => `      ${line}`).join('\n')}`,
+        `✗ case ${result.index + 1}  ${t('runner.runtimeError')}`,
+        result.input ? labeledValue(t('runner.input'), result.input) : undefined,
+        `    ${t('runner.error')}:\n${errorLines.map((line) => `      ${line}`).join('\n')}`,
       ].filter(Boolean).join('\n');
     }
     const difference = firstDifference(result.expected, result.actual);
     return [
-      `✗ case ${result.index + 1}  Wrong Answer`,
-      result.input ? labeledValue('input', result.input) : undefined,
-      labeledValue('expected', result.expected),
-      labeledValue('received', result.actual),
-      difference ? `    首个差异：${difference}` : undefined,
+      `✗ case ${result.index + 1}  ${t('runner.wrongAnswer')}`,
+      result.input ? labeledValue(t('runner.input'), result.input) : undefined,
+      labeledValue(t('runner.expected'), result.expected),
+      labeledValue(t('runner.received'), result.actual),
+      difference ? `    ${t('runner.firstDifference', { difference })}` : undefined,
     ].filter(Boolean).join('\n');
   });
   const passed = results.filter((result) => result.passed).length;
-  lines.push(`\n${passed}/${results.length} tests passed`);
+  lines.push(`\n${t('runner.summary', { passed, total: results.length })}`);
   return lines.join('\n');
 }

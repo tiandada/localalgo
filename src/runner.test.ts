@@ -4,7 +4,15 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { findProblem } from './catalog.js';
-import { formatCustomResult, formatResults, runCustomTest, runTests } from './runner.js';
+import { getLocale, setLocale } from './messages.js';
+import {
+  formatCustomResult,
+  formatResults,
+  isCancelledResult,
+  isCompilationFailure,
+  runCustomTest,
+  runTests,
+} from './runner.js';
 
 test('runs a correct Python solution', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'localcode-test-'));
@@ -38,8 +46,8 @@ test('formats the first public array and string difference', () => {
     actual: [1, 9, 3],
     durationMs: 1,
   }]);
-  assert.match(arrayOutput, /Wrong Answer/);
-  assert.match(arrayOutput, /input:/);
+  assert.match(arrayOutput, /答案错误/);
+  assert.match(arrayOutput, /输入:/);
   assert.match(arrayOutput, /4/);
   assert.match(arrayOutput, /result\[1\] 应为 2，实际为 9/);
 
@@ -63,9 +71,9 @@ test('shows complete values for every failed local test', () => {
     actual: 'wrong',
     durationMs: 1,
   }]);
-  assert.match(output, /input:/);
-  assert.match(output, /expected:/);
-  assert.match(output, /received:/);
+  assert.match(output, /输入:/);
+  assert.match(output, /期望:/);
+  assert.match(output, /实际:/);
   assert.equal(output.includes(longValue), true);
   assert.doesNotMatch(output, /…/);
 });
@@ -170,8 +178,9 @@ test('returns a readable C++ compilation error', async () => {
   assert.ok(problem);
   const results = await runTests(problem, solution, false, 'cpp');
   assert.equal(results.length, 1);
-  assert.match(results[0]?.error ?? '', /编译失败/);
+  assert.equal(isCompilationFailure(results[0]!), true);
   assert.match(formatResults(results), /this is not valid C\+\+/);
+  assert.match(formatResults(results), /编译失败/);
 });
 
 test('runs a custom Python input and returns its value', async () => {
@@ -384,7 +393,43 @@ test('cancels a running solution without waiting for its timeout', async () => {
   const result = await runCustomTest(problem, solution, [[]], 'python', 5000, controller.signal);
   clearTimeout(timer);
   assert.equal(result.error, '执行已取消');
+  assert.equal(isCancelledResult(result), true);
   assert.ok(Date.now() - started < 2000);
+});
+
+test('localizes result formatting without changing failure predicates', () => {
+  const original = getLocale();
+  try {
+    setLocale('en');
+    const wrong = formatResults([{
+      index: 0,
+      passed: false,
+      input: [[1, 2]],
+      expected: [1, 3],
+      actual: [1, 4],
+      durationMs: 1,
+    }]);
+    assert.match(wrong, /Wrong Answer/);
+    assert.match(wrong, /First difference/);
+    assert.match(wrong, /0\/1 tests passed/);
+
+    const compilation = {
+      index: 0,
+      passed: false,
+      expected: undefined,
+      durationMs: 0,
+      error: 'compiler details',
+      failureKind: 'compilation' as const,
+    };
+    assert.equal(isCompilationFailure(compilation), true);
+    assert.match(formatCustomResult(compilation), /Compilation failed/);
+
+    const cancelled = { ...compilation, failureKind: 'cancelled' as const };
+    assert.equal(isCancelledResult(cancelled), true);
+    assert.equal(isCompilationFailure(cancelled), false);
+  } finally {
+    setLocale(original);
+  }
 });
 
 test('stops a solution that exceeds the output limit', async () => {

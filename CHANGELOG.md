@@ -11,6 +11,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Localize command help, pickers, status text, and core CLI feedback in Chinese and English.
+- Localize Python/C++ runner diagnostics and use structured failure kinds for cancellation and compilation errors.
 
 ## [0.1.1] - 2026-08-18
 

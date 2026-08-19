@@ -8,7 +8,13 @@ import { Box, Static, Text, render, useApp, useInput, useStdin } from 'ink';
 import { problems as builtInProblems } from './catalog.js';
 import { completeInput, formatHelp, suggestionsForInput } from './commands.js';
 import { deleteBackward, deleteForward } from './composer.js';
-import { formatCustomResult, formatResults, runCustomTest, runTests } from './runner.js';
+import {
+  formatCustomResult,
+  formatResults,
+  isCancelledResult,
+  runCustomTest,
+  runTests,
+} from './runner.js';
 import { getLocale, localeLabel, setLocale, t } from './messages.js';
 import { Storage } from './storage.js';
 import { findTutorial, formatRoadmap, formatTutorial, tutorials } from './tutorials.js';
@@ -926,7 +932,7 @@ function App({ workspace, clearOutput }: AppProps) {
             controller.signal,
           );
           const displayedResult = controller.signal.aborted
-            ? { ...result, passed: false, error: t('run.cancelled') }
+            ? { ...result, passed: false, error: t('run.cancelled'), failureKind: 'cancelled' as const }
             : result;
           append(displayedResult.error ? 'error' : 'success', formatCustomResult(displayedResult));
         } finally {
@@ -959,9 +965,17 @@ function App({ workspace, clearOutput }: AppProps) {
             controller.signal,
           );
           const displayedResults = controller.signal.aborted
-            ? [{ index: 0, passed: false, input: problem.sampleTests[0]?.input, expected: undefined, durationMs: 0, error: t('run.cancelled') }]
+            ? [{
+                index: 0,
+                passed: false,
+                input: problem.sampleTests[0]?.input,
+                expected: undefined,
+                durationMs: 0,
+                error: t('run.cancelled'),
+                failureKind: 'cancelled' as const,
+              }]
             : results;
-          const cancelled = controller.signal.aborted || results.some((result) => result.error === '执行已取消');
+          const cancelled = controller.signal.aborted || results.some(isCancelledResult);
           const allPassed = displayedResults.length > 0 && displayedResults.every((result) => result.passed);
           append(allPassed ? 'success' : 'error', formatResults(displayedResults));
           if (submitting && !cancelled) {

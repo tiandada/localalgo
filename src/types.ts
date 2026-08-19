@@ -43,6 +43,7 @@ export interface TestResult {
   actual?: unknown;
   durationMs: number;
   error?: string;
+  failureKind?: 'cancelled' | 'compilation' | 'runtime';
 }
 
 export interface ProgressEntry {
