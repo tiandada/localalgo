@@ -15,7 +15,6 @@ import { findTutorial, formatRoadmap, formatTutorial, tutorials } from './tutori
 import type { Difficulty, Language, Message, MessageKind, Problem, ProgressState } from './types.js';
 import { packageVersion, wantsVersion } from './version.js';
 
-const helpText = formatHelp();
 const cliRunTimeoutMs = 5000;
 
 function problemText(problem: Problem): string {
@@ -104,8 +103,10 @@ async function toolVersion(command: string): Promise<string> {
       settled = true;
       const firstLine = output.split('\n').map((line) => line.trim()).find(Boolean);
       resolve(code === 0
-        ? `✓ ${command} · ${firstLine ?? '可用'}`
-        : `✗ ${command} · ${signal ? `被终止（${signal}）` : `退出码 ${code ?? 'unknown'}`}`);
+        ? `✓ ${command} · ${firstLine ?? t('tool.available')}`
+        : `✗ ${command} · ${signal
+          ? t('tool.terminated', { signal })
+          : t('tool.exitCode', { code: code ?? 'unknown' })}`);
     });
   });
 }
@@ -267,7 +268,7 @@ function Composer({ busy, problemSlugs, topics, tutorialTopics, onSubmit }: Comp
         {value ? (
           <Text>{before}<Text inverse>{atCursor}</Text>{after}</Text>
         ) : (
-          <Text><Text inverse> </Text><Text dimColor> 输入 /help</Text></Text>
+          <Text><Text inverse> </Text><Text dimColor> {t('cli.input')}</Text></Text>
         )}
       </Box>
     </Box>
@@ -320,7 +321,7 @@ function TopicPicker({ choices, onCancel, onSelect }: TopicPickerProps) {
       const difficulty = shortcut === 'e' ? 'easy' : shortcut === 'm' ? 'medium' : shortcut === 'h' ? 'hard' : undefined;
       if (!difficulty) return;
       if (choice.difficulties[difficulty] === 0) {
-        setNotice(`${choice.name} 暂无 ${difficulty} 难度题目`);
+        setNotice(t('picker.noDifficulty', { topic: choice.name, difficulty }));
         return;
       }
       onSelect(choice.name, difficulty);
@@ -329,8 +330,8 @@ function TopicPicker({ choices, onCancel, onSelect }: TopicPickerProps) {
 
   return (
     <Box flexDirection="column">
-      <Text color="cyan">选择题目类型</Text>
-      {start > 0 && <Text dimColor>  ↑ 还有 {start} 项</Text>}
+      <Text color="cyan">{t('picker.topic')}</Text>
+      {start > 0 && <Text dimColor>  {t('picker.up', { count: start })}</Text>}
       {visible.map((choice, index) => {
         const absoluteIndex = start + index;
         const active = absoluteIndex === selected;
@@ -341,11 +342,11 @@ function TopicPicker({ choices, onCancel, onSelect }: TopicPickerProps) {
         );
       })}
       {start + visible.length < choices.length && (
-        <Text dimColor>  ↓ 还有 {choices.length - start - visible.length} 项</Text>
+        <Text dimColor>  {t('picker.down', { count: choices.length - start - visible.length })}</Text>
       )}
       <Box marginTop={1}>
         <Text color={notice ? 'yellow' : undefined} dimColor={!notice}>
-          {notice || '↑↓/j k 移动 · Enter 不限难度 · E/M/H 选择难度 · Esc 取消'}
+          {notice || t('picker.topicControls')}
         </Text>
       </Box>
     </Box>
@@ -388,8 +389,8 @@ function LearnPicker({ choices, onCancel, onSelect }: LearnPickerProps) {
 
   return (
     <Box flexDirection="column">
-      <Text color="cyan">选择要学习的题型</Text>
-      {start > 0 && <Text dimColor>  ↑ 还有 {start} 项</Text>}
+      <Text color="cyan">{t('picker.learn')}</Text>
+      {start > 0 && <Text dimColor>  {t('picker.up', { count: start })}</Text>}
       {visible.map((choice, index) => {
         const active = start + index === selected;
         return (
@@ -399,10 +400,10 @@ function LearnPicker({ choices, onCancel, onSelect }: LearnPickerProps) {
         );
       })}
       {start + visible.length < choices.length && (
-        <Text dimColor>  ↓ 还有 {choices.length - start - visible.length} 项</Text>
+        <Text dimColor>  {t('picker.down', { count: choices.length - start - visible.length })}</Text>
       )}
       <Box marginTop={1}>
-        <Text dimColor>↑↓/j k 移动 · Enter 学习 · Esc 取消</Text>
+        <Text dimColor>{t('picker.learnControls')}</Text>
       </Box>
     </Box>
   );
@@ -417,17 +418,12 @@ function App({ workspace, clearOutput }: AppProps) {
   const storage = useMemo(() => new Storage(workspace), [workspace]);
   const [catalog, setCatalog] = useState<Problem[]>(builtInProblems);
   const [progress, setProgress] = useState<ProgressState>({ problems: {} });
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 1,
-      kind: 'system',
-      text: 'LocalAlgo · 离线算法练习\n输入 /help 查看命令，或从 /list 开始。',
-    },
-  ]);
-  const [busy, setBusy] = useState('正在载入本地状态…');
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [busy, setBusy] = useState(t('cli.loading'));
+  const [, setUiLocale] = useState(getLocale());
   const [topicPickerOpen, setTopicPickerOpen] = useState(false);
   const [learnPickerOpen, setLearnPickerOpen] = useState(false);
-  const nextMessageId = useRef(2);
+  const nextMessageId = useRef(1);
   const hintLevels = useRef<Record<string, number>>({});
   const runController = useRef<AbortController | undefined>(undefined);
   const cancelKeyInFlight = useRef(false);
@@ -439,7 +435,7 @@ function App({ workspace, clearOutput }: AppProps) {
     const controller = runController.current;
     if (controller && !controller.signal.aborted) {
       cancelKeyInFlight.current = true;
-      setBusy('正在取消本次运行…');
+      setBusy(t('cli.cancelling'));
       controller.abort();
       setTimeout(() => {
         cancelKeyInFlight.current = false;
@@ -463,16 +459,22 @@ function App({ workspace, clearOutput }: AppProps) {
     Promise.allSettled([storage.load(), storage.loadProblems()]).then(([stateResult, problemsResult]) => {
       if (stateResult.status === 'fulfilled') {
         setProgress(stateResult.value);
-        setLocale(stateResult.value.locale ?? 'zh');
-        if (storage.migratedFromLegacyDirectory) append('system', '已将旧版 .localcode 数据迁移到 .localalgo。');
-        if (storage.recoveredFromBackup) append('system', '检测到状态文件损坏，已从 state.json.bak 恢复进度。');
+        const restoredLocale = stateResult.value.locale ?? 'zh';
+        setLocale(restoredLocale);
+        setUiLocale(restoredLocale);
+        append('system', t('cli.welcome'));
+        if (storage.migratedFromLegacyDirectory) append('system', t('state.migrated'));
+        if (storage.recoveredFromBackup) append('system', t('state.recovered'));
       }
-      else append('error', `读取状态失败：${String(stateResult.reason)}`);
+      else {
+        append('system', t('cli.welcome'));
+        append('error', t('state.failed', { error: String(stateResult.reason) }));
+      }
       if (problemsResult.status === 'fulfilled') {
         const occupied = new Set(builtInProblems.map((problem) => problem.slug));
         const custom = problemsResult.value.filter((problem) => {
           if (occupied.has(problem.slug)) {
-            append('error', `自定义题目与现有 slug 冲突，已跳过：${problem.slug}`);
+            append('error', t('catalog.conflict', { slug: problem.slug }));
             return false;
           }
           occupied.add(problem.slug);
@@ -480,7 +482,7 @@ function App({ workspace, clearOutput }: AppProps) {
         });
         setCatalog([...builtInProblems, ...custom]);
       } else {
-        append('error', `读取自定义题库失败：${String(problemsResult.reason)}`);
+        append('error', t('catalog.failed', { error: String(problemsResult.reason) }));
       }
       setBusy('');
     });
@@ -525,7 +527,7 @@ function App({ workspace, clearOutput }: AppProps) {
     const problem = progress.activeProblem
       ? catalog.find((candidate) => candidate.slug === progress.activeProblem)
       : undefined;
-    if (!problem) append('error', '还没有选择题目。请先使用 /list 和 /pick <slug>。');
+    if (!problem) append('error', t('problem.none'));
     return problem;
   }, [append, catalog, progress.activeProblem]);
 
@@ -569,7 +571,11 @@ function App({ workspace, clearOutput }: AppProps) {
       });
       append(
         'info',
-        `${problemText(problem)}\n\n语言：${languageLabel(language)}\n代码：${path.relative(workspace, solutionPath)}\n输入 /edit 开始。`,
+        t('problem.selected', {
+          body: problemText(problem),
+          language: languageLabel(language),
+          path: path.relative(workspace, solutionPath),
+        }),
       );
     },
     [append, ensureSolutionFile, persist, progress, workspace],
@@ -581,10 +587,13 @@ function App({ workspace, clearOutput }: AppProps) {
       const editorCommand = process.env.VISUAL || process.env.EDITOR || 'vi';
       const [editor, ...editorArgs] = splitEditorCommand(editorCommand);
       if (!editor) {
-        append('error', '无法解析 $VISUAL 或 $EDITOR。');
+        append('error', t('editor.invalid'));
         return;
       }
-      append('info', `打开 ${path.relative(workspace, solutionPath)} · ${editorCommand}`);
+      append('info', t('editor.opening', {
+        path: path.relative(workspace, solutionPath),
+        editor: editorCommand,
+      }));
 
       // Let Ink commit the command and the busy state before handing control to
       // a full-screen editor. Clearing Ink's dynamic region on both sides of
@@ -601,8 +610,8 @@ function App({ workspace, clearOutput }: AppProps) {
       // own cursor in Composer, so hide the hardware cursor again after Vim
       // exits; otherwise it remains visible on a separate line at the bottom.
       process.stdout.write('\x1b[?25l');
-      if (result.error) append('error', `启动编辑器失败：${result.error.message}`);
-      else append('info', `已返回 LocalAlgo · ${path.relative(workspace, solutionPath)}`);
+      if (result.error) append('error', t('editor.failed', { error: result.error.message }));
+      else append('info', t('editor.returned', { path: path.relative(workspace, solutionPath) }));
     },
     [append, clearOutput, ensureSolutionFile, setRawMode, workspace],
   );
@@ -614,7 +623,10 @@ function App({ workspace, clearOutput }: AppProps) {
       const unsolved = matching.filter((problem) => progress.problems[problem.slug]?.status !== 'solved');
       const candidates = unsolved.length ? unsolved : matching;
       if (!candidates.length) {
-        append('error', `${topic} 类型下没有${difficulty ? ` ${difficulty}` : ''} 难度的题目。`);
+        append('error', t('topic.empty', {
+          topic,
+          difficulty: difficulty ? `${difficulty} ` : '',
+        }));
         return;
       }
       const problem = candidates[Math.floor(Math.random() * candidates.length)]!;
@@ -629,7 +641,7 @@ function App({ workspace, clearOutput }: AppProps) {
       if (!trimmed) return;
       append('user', trimmed);
       if (!trimmed.startsWith('/')) {
-        append('info', '当前版本是离线命令模式。输入 /help 查看可用命令。');
+        append('info', t('cli.offline'));
         return;
       }
 
@@ -639,7 +651,7 @@ function App({ workspace, clearOutput }: AppProps) {
       const argumentText = separator === -1 ? '' : commandInput.slice(separator).trim();
       const args = argumentText ? argumentText.split(/\s+/) : [];
       if (command === 'help') {
-        append('info', helpText);
+        append('info', formatHelp());
         return;
       }
       if (command === 'quit' || command === 'exit') {
@@ -648,12 +660,12 @@ function App({ workspace, clearOutput }: AppProps) {
       }
       if (command === 'import') {
         if (!argumentText) {
-          append('error', '缺少题包路径。示例：/import ./my-problems.json');
+          append('error', t('import.missing'));
           return;
         }
         const pathParts = splitEditorCommand(argumentText);
         if (pathParts.length !== 1) {
-          append('error', '题包路径包含空格时，请使用引号包围完整路径。');
+          append('error', t('import.quote'));
           return;
         }
         const sourcePath = path.resolve(process.cwd(), pathParts[0]!);
@@ -664,7 +676,7 @@ function App({ workspace, clearOutput }: AppProps) {
         setCatalog((current) => [...current, ...imported]);
         append(
           'success',
-          `已导入 ${imported.length} 道题目\n${imported.map((problem) => `  ${problem.slug} · ${problem.title}`).join('\n')}`,
+          `${t('import.success', { count: imported.length })}\n${imported.map((problem) => `  ${problem.slug} · ${problem.title}`).join('\n')}`,
         );
         return;
       }
@@ -696,11 +708,16 @@ function App({ workspace, clearOutput }: AppProps) {
                 })
                   .join('\n');
                 const next = page < pageCount
-                  ? ` · 下一页：/list${query ? ` ${query}` : ''} ${page + 1}`
+                  ? ` · ${t('list.next', { command: `/list${query ? ` ${query}` : ''} ${page + 1}` })}`
                   : '';
-                return `${rows}\n\n第 ${page}/${pageCount} 页 · 共 ${filtered.length} 道${next}`;
+                return `${rows}\n\n${t('list.page', {
+                  page,
+                  pages: pageCount,
+                  count: filtered.length,
+                  next,
+                })}`;
               })()
-            : `没有找到与“${query}”匹配的题目。`,
+            : t('list.empty', { query }),
         );
         return;
       }
@@ -722,7 +739,7 @@ function App({ workspace, clearOutput }: AppProps) {
         }
         const tutorial = findTutorial(argumentText);
         if (!tutorial) {
-          append('error', `没有找到“${argumentText}”的教程。输入 /learn 打开教程列表。`);
+          append('error', t('learn.missing', { topic: argumentText }));
           return;
         }
         append('info', formatTutorial(tutorial));
@@ -735,7 +752,7 @@ function App({ workspace, clearOutput }: AppProps) {
       if (command === 'next') {
         const tutorial = argumentText ? findTutorial(argumentText) : undefined;
         if (argumentText && !tutorial) {
-          append('error', `没有找到“${argumentText}”的学习路线。输入 /learn 查看可用类型。`);
+          append('error', t('next.missing', { topic: argumentText }));
           return;
         }
         const route = [...new Set(
@@ -745,12 +762,15 @@ function App({ workspace, clearOutput }: AppProps) {
           .filter((problem): problem is Problem => Boolean(problem));
         if (activeProblem && route.some((problem) => problem.slug === activeProblem.slug) &&
           progress.problems[activeProblem.slug]?.status !== 'solved') {
-          append('info', `当前推荐题 ${activeProblem.slug} 还没有完成。可以继续 /edit，或使用 /topic 临时换题。`);
+          append('info', t('next.incomplete', { slug: activeProblem.slug }));
           return;
         }
         const problem = route.find((candidate) => progress.problems[candidate.slug]?.status !== 'solved');
         if (!problem) {
-          append('success', `${tutorial ? `${tutorial.topic}推荐题单` : '初学者学习路线'}已经全部完成。`);
+          const route = tutorial
+            ? t('next.topicRoute', { topic: tutorial.topic })
+            : t('next.beginnerRoute');
+          append('success', t('next.complete', { route }));
           return;
         }
         await activateProblem(problem, activeLanguage);
@@ -764,12 +784,12 @@ function App({ workspace, clearOutput }: AppProps) {
         }
         const topic = topics.find((candidate) => candidate.toLowerCase() === requested?.toLowerCase());
         if (!topic) {
-          append('error', `题目类型不存在${requested ? `：${requested}` : ''}。使用 /topics 查看全部类型。`);
+          append('error', t('topic.unknown', { topic: requested ? `：${requested}` : '' }));
           return;
         }
         const difficulty = args[1]?.toLowerCase() as Difficulty | undefined;
         if (difficulty && !['easy', 'medium', 'hard'].includes(difficulty)) {
-          append('error', '难度必须是 easy、medium 或 hard。');
+          append('error', t('difficulty.invalid'));
           return;
         }
         await activateTopic(topic, difficulty);
@@ -778,12 +798,12 @@ function App({ workspace, clearOutput }: AppProps) {
       if (command === 'pick') {
         const problem = catalog.find((candidate) => candidate.slug === (args[0] ?? ''));
         if (!problem) {
-          append('error', '题目不存在。使用 /list 查看可用 slug。');
+          append('error', t('problem.unknown'));
           return;
         }
         const requestedLanguage = args[1] ? parseLanguage(args[1]) : activeLanguage;
         if (!requestedLanguage) {
-          append('error', '不支持该语言。目前可用：python、cpp。');
+          append('error', t('language.unsupported'));
           return;
         }
         await activateProblem(problem, requestedLanguage);
@@ -792,14 +812,14 @@ function App({ workspace, clearOutput }: AppProps) {
       if (command === 'random') {
         const difficulty = args[0]?.toLowerCase();
         if (difficulty && !['easy', 'medium', 'hard'].includes(difficulty)) {
-          append('error', '难度必须是 easy、medium 或 hard。');
+          append('error', t('difficulty.invalid'));
           return;
         }
         const matching = catalog.filter((problem) => !difficulty || problem.difficulty === difficulty);
         const unsolved = matching.filter((problem) => progress.problems[problem.slug]?.status !== 'solved');
         const candidates = unsolved.length ? unsolved : matching;
         if (!candidates.length) {
-          append('error', `当前题库没有 ${difficulty} 难度的题目。`);
+          append('error', t('catalog.noDifficulty', { difficulty: difficulty ?? '' }));
           return;
         }
         const problem = candidates[Math.floor(Math.random() * candidates.length)]!;
@@ -808,12 +828,12 @@ function App({ workspace, clearOutput }: AppProps) {
       }
       if (command === 'lang') {
         if (!args[0]) {
-          append('info', `当前语言：${languageLabel(activeLanguage)}\n可用语言：python、cpp`);
+          append('info', t('language.current', { language: languageLabel(activeLanguage) }));
           return;
         }
         const language = parseLanguage(args[0]);
         if (!language) {
-          append('error', '不支持该语言。目前可用：python、cpp。');
+          append('error', t('language.unsupported'));
           return;
         }
         const problem = activeProblem;
@@ -823,7 +843,10 @@ function App({ workspace, clearOutput }: AppProps) {
         await persist({ ...progress, activeLanguage: language });
         append(
           'success',
-          `已切换到 ${languageLabel(language)}${solutionPath ? ` · ${path.relative(workspace, solutionPath)}` : ''}`,
+          t('language.switched', {
+            language: languageLabel(language),
+            path: solutionPath ? ` · ${path.relative(workspace, solutionPath)}` : '',
+          }),
         );
         return;
       }
@@ -838,6 +861,7 @@ function App({ workspace, clearOutput }: AppProps) {
           return;
         }
         setLocale(requested);
+        setUiLocale(requested);
         await persist({ ...progress, locale: requested });
         append('success', t('cli.locale.switched', { label: localeLabel(requested) }));
         return;
@@ -855,7 +879,7 @@ function App({ workspace, clearOutput }: AppProps) {
         hintLevels.current[problem.slug] = level + 1;
         append(
           'info',
-          `提示 ${level + 1}/${problem.hints.length}\n${problem.hints[level]}${level === problem.hints.length - 1 ? '\n\n已经是最后一级提示。' : ''}`,
+          `${t('hint.title', { current: level + 1, total: problem.hints.length })}\n${problem.hints[level]}${level === problem.hints.length - 1 ? `\n\n${t('hint.last')}` : ''}`,
         );
         return;
       }
@@ -868,28 +892,28 @@ function App({ workspace, clearOutput }: AppProps) {
         const problem = requireActive();
         if (!problem) return;
         if (!argumentText) {
-          append('error', '缺少参数。示例：/test [[2,7,11,15],9]');
+          append('error', t('test.missing'));
           return;
         }
         let customInput: unknown;
         try {
           customInput = JSON.parse(argumentText);
         } catch (error) {
-          append('error', `JSON 参数格式错误：${(error as Error).message}`);
+          append('error', t('test.json', { error: (error as Error).message }));
           return;
         }
         if (!Array.isArray(customInput)) {
-          append('error', '参数必须是 JSON 数组，每一项对应函数的一个参数。');
+          append('error', t('test.array'));
           return;
         }
         const solutionPath = storage.solutionPath(problem.slug, activeLanguage);
         try {
           await access(solutionPath, constants.R_OK);
         } catch {
-          append('error', `找不到 ${path.relative(workspace, solutionPath)}，请使用 /edit 创建。`);
+          append('error', t('solution.missing', { path: path.relative(workspace, solutionPath) }));
           return;
         }
-        setBusy('正在运行自定义输入…');
+        setBusy(t('cli.runningCustom'));
         const controller = new AbortController();
         runController.current = controller;
         try {
@@ -902,7 +926,7 @@ function App({ workspace, clearOutput }: AppProps) {
             controller.signal,
           );
           const displayedResult = controller.signal.aborted
-            ? { ...result, passed: false, error: '执行已取消' }
+            ? { ...result, passed: false, error: t('run.cancelled') }
             : result;
           append(displayedResult.error ? 'error' : 'success', formatCustomResult(displayedResult));
         } finally {
@@ -918,11 +942,11 @@ function App({ workspace, clearOutput }: AppProps) {
         try {
           await access(solutionPath, constants.R_OK);
         } catch {
-          append('error', `找不到 ${path.relative(workspace, solutionPath)}，请使用 /edit 创建。`);
+          append('error', t('solution.missing', { path: path.relative(workspace, solutionPath) }));
           return;
         }
         const submitting = command === 'submit';
-        setBusy(submitting ? '正在运行全部本地测试…' : '正在运行公开样例…');
+        setBusy(submitting ? t('cli.runningAll') : t('cli.runningSamples'));
         const controller = new AbortController();
         runController.current = controller;
         try {
@@ -935,7 +959,7 @@ function App({ workspace, clearOutput }: AppProps) {
             controller.signal,
           );
           const displayedResults = controller.signal.aborted
-            ? [{ index: 0, passed: false, input: problem.sampleTests[0]?.input, expected: undefined, durationMs: 0, error: '执行已取消' }]
+            ? [{ index: 0, passed: false, input: problem.sampleTests[0]?.input, expected: undefined, durationMs: 0, error: t('run.cancelled') }]
             : results;
           const cancelled = controller.signal.aborted || results.some((result) => result.error === '执行已取消');
           const allPassed = displayedResults.length > 0 && displayedResults.every((result) => result.passed);
@@ -972,7 +996,13 @@ function App({ workspace, clearOutput }: AppProps) {
         const solved = Object.values(progress.problems).filter((entry) => entry.status === 'solved').length;
         const attempts = Object.values(progress.problems).reduce((sum, entry) => sum + entry.attempts, 0);
         const wrong = Object.values(progress.problems).filter((entry) => (entry.failedAttempts ?? 0) > 0).length;
-        append('info', `已完成 ${solved}/${catalog.length} · 已开始 ${started} · 提交 ${attempts} 次 · 错题 ${wrong}`);
+        append('info', t('progress.summary', {
+          solved,
+          total: catalog.length,
+          started,
+          attempts,
+          wrong,
+        }));
         return;
       }
       if (command === 'wrong') {
@@ -985,18 +1015,18 @@ function App({ workspace, clearOutput }: AppProps) {
               .localeCompare(leftEntry.lastAttemptAt ?? leftEntry.updatedAt);
           });
         if (!wrongProblems.length) {
-          append('info', '错题本还是空的。提交未通过的题目会自动记录在这里。');
+          append('info', t('wrong.empty'));
           return;
         }
         const visible = wrongProblems.slice(0, 20).map((problem) => {
           const entry = progress.problems[problem.slug]!;
-          const status = entry.status === 'solved' ? '✓ 已掌握' : '· 待复习';
-          return `${status}  ${problem.slug} · 失败 ${entry.failedAttempts} 次`;
+          const status = entry.status === 'solved' ? t('wrong.mastered') : t('wrong.review');
+          return `${status}  ${problem.slug} · ${t('wrong.failures', { count: entry.failedAttempts ?? 0 })}`;
         });
         const remaining = wrongProblems.length > visible.length
-          ? `\n… 还有 ${wrongProblems.length - visible.length} 道`
+          ? `\n${t('wrong.more', { count: wrongProblems.length - visible.length })}`
           : '';
-        append('info', `错题本\n${visible.join('\n')}${remaining}\n\n输入 /review 开始复习。`);
+        append('info', `${t('wrong.title')}\n${visible.join('\n')}${remaining}\n\n${t('wrong.prompt')}`);
         return;
       }
       if (command === 'review') {
@@ -1008,7 +1038,7 @@ function App({ workspace, clearOutput }: AppProps) {
         );
         const candidates = unsolved.length ? unsolved : wrongProblems;
         if (!candidates.length) {
-          append('info', '错题本还是空的，暂时没有需要复习的题目。');
+          append('info', t('review.empty'));
           return;
         }
         await activateProblem(candidates[Math.floor(Math.random() * candidates.length)]!, activeLanguage);
@@ -1034,7 +1064,7 @@ function App({ workspace, clearOutput }: AppProps) {
         );
         return;
       }
-      append('error', `未知命令 /${command}。输入 /help 查看可用命令。`);
+      append('error', t('command.unknown', { command }));
     },
     [activateProblem, activateTopic, activeLanguage, activeProblem, append, catalog, editSolution, ensureSolutionFile, exit, persist, progress, requireActive, storage, topics, workspace],
   );
@@ -1042,10 +1072,10 @@ function App({ workspace, clearOutput }: AppProps) {
   const selectTopic = useCallback(
     (topic: string, difficulty?: Difficulty) => {
       setTopicPickerOpen(false);
-      setBusy('正在选择题目…');
+      setBusy(t('cli.selecting'));
       append('user', `${topic}${difficulty ? ` · ${difficulty}` : ''}`);
       activateTopic(topic, difficulty)
-        .catch((error) => append('error', `选题失败：${String(error)}`))
+        .catch((error) => append('error', t('topic.failed', { error: String(error) })))
         .finally(() => setBusy(''));
     },
     [activateTopic, append],
@@ -1056,7 +1086,7 @@ function App({ workspace, clearOutput }: AppProps) {
       setLearnPickerOpen(false);
       const tutorial = findTutorial(topic);
       if (!tutorial) {
-        append('error', `没有找到“${topic}”的教程。`);
+        append('error', t('learn.notFound', { topic }));
         return;
       }
       append('user', `/learn ${topic}`);
@@ -1067,9 +1097,9 @@ function App({ workspace, clearOutput }: AppProps) {
 
   const submit = useCallback(
     (value: string) => {
-      setBusy('处理中…');
+      setBusy(t('cli.processing'));
       execute(value)
-        .catch((error) => append('error', `命令执行失败：${String(error)}`))
+        .catch((error) => append('error', t('command.failed', { error: String(error) })))
         .finally(() => setBusy(''));
     },
     [append, execute],
@@ -1085,7 +1115,7 @@ function App({ workspace, clearOutput }: AppProps) {
           choices={topicChoices}
           onCancel={() => {
             setTopicPickerOpen(false);
-            append('info', '已取消类型选题。');
+            append('info', t('topic.cancelled'));
           }}
           onSelect={selectTopic}
         />
@@ -1094,7 +1124,7 @@ function App({ workspace, clearOutput }: AppProps) {
           choices={tutorials}
           onCancel={() => {
             setLearnPickerOpen(false);
-            append('info', '已取消学习。');
+            append('info', t('learn.cancelled'));
           }}
           onSelect={selectTutorial}
         />
@@ -1109,7 +1139,7 @@ function App({ workspace, clearOutput }: AppProps) {
       )}
       <Box marginTop={1}>
         <Text dimColor>
-          {activeProblem ? `${activeProblem.slug} · ${languageLabel(activeLanguage)}` : `未选择题目 · ${languageLabel(activeLanguage)}`} · Ctrl+C {runController.current ? '取消' : '退出'}
+          {activeProblem ? `${activeProblem.slug} · ${languageLabel(activeLanguage)}` : `${t('footer.none')} · ${languageLabel(activeLanguage)}`} · Ctrl+C {runController.current ? t('footer.cancel') : t('footer.exit')}
         </Text>
       </Box>
     </Box>
@@ -1124,15 +1154,14 @@ if (wantsVersion(args)) {
 
 if (args.includes('--help') || args.includes('-h')) {
   process.stdout.write(
-    `LocalAlgo - 离线、消息流式算法练习 CLI\n\n` +
-    `用法：localalgo [选项] [workspace]\n\n` +
-    `选项：\n  -v, --version  显示版本号\n  -h, --help     显示帮助\n\n${helpText}\n`,
+    `${t('help.description')}\n\n${t('help.usage')}\n\n` +
+    `${t('help.options')}\n  ${t('help.version')}\n  ${t('help.help')}\n\n${formatHelp()}\n`,
   );
   process.exit(0);
 }
 
 if (!process.stdin.isTTY || !process.stdout.isTTY) {
-  process.stderr.write('LocalAlgo 需要交互式终端（TTY）。\n');
+  process.stderr.write(`${t('tty.required')}\n`);
   process.exit(1);
 }
 

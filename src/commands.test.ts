@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { completeInput, suggestionsForInput } from './commands.js';
+import { completeInput, formatHelp, suggestionsForInput } from './commands.js';
+import { getLocale, setLocale } from './messages.js';
 
 const slugs = ['two-sum', 'valid-brackets', 'max-profit'];
 
@@ -27,4 +28,20 @@ test('suggests matching commands and arguments', () => {
   assert.deepEqual(suggestionsForInput('/topic 数组 e', slugs, ['数组']), ['/topic 数组 easy']);
   assert.deepEqual(suggestionsForInput('/learn 数', slugs, [], ['数组', '滑动窗口']), ['/learn 数组']);
   assert.deepEqual(suggestionsForInput('/next 滑', slugs, [], ['数组', '滑动窗口']), ['/next 滑动窗口']);
+});
+
+test('localizes command suggestions and help at call time', () => {
+  const original = getLocale();
+  try {
+    setLocale('en');
+    assert.match(suggestionsForInput('/doc', slugs)[0]!, /Check the local runtime environment/);
+    assert.match(formatHelp(), /Available commands/);
+    assert.match(formatHelp(), /\/list \[keyword\] \[page\]/);
+    assert.match(formatHelp(), /\/lang \[python\|cpp\]/);
+    assert.match(formatHelp(), /\/locale \[zh\|en\]/);
+    setLocale('zh');
+    assert.match(formatHelp(), /可用命令/);
+  } finally {
+    setLocale(original);
+  }
 });

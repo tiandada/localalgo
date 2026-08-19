@@ -89,6 +89,7 @@ solutions/*.cpp            # C++ 解答
 /pick two-sum
 /random easy
 /hint
+/locale en
 /edit
 /test [[2,7,11,15],9]
 /run
@@ -98,6 +99,12 @@ solutions/*.cpp            # C++ 解答
 /review
 /doctor
 ```
+
+## 界面语言
+
+LocalAlgo 默认使用中文。输入 `/locale en` 可以切换英文界面，输入 `/locale zh`
+切回中文；选择会保存在当前练习工作区，重新启动后自动恢复。命令帮助、选择器、
+运行状态和交互反馈支持中英文，内置题目与教程内容目前仍以中文提供。
 
 切换到 C++：
 

@@ -20,6 +20,17 @@ test('zh and en tables cover the same keys', () => {
   }
 });
 
+test('zh and en messages use the same interpolation parameters', () => {
+  const placeholders = (value: string) => [...value.matchAll(/\{(\w+)\}/g)]
+    .map((match) => match[1])
+    .sort();
+  for (const key of messageKeys()) {
+    const zh = withLocale('zh', () => t(key));
+    const en = withLocale('en', () => t(key));
+    assert.deepEqual(placeholders(en), placeholders(zh), `placeholder mismatch for ${key}`);
+  }
+});
+
 test('interpolates named parameters', () => {
   assert.equal(
     withLocale('zh', () => t('cli.locale.switched', { label: '中文' })),

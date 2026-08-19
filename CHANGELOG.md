@@ -8,6 +8,10 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 - Add `/locale [zh|en]` to switch the interface language; the choice is persisted in state schema version 3 (older state files still load).
 
+### Changed
+
+- Localize command help, pickers, status text, and core CLI feedback in Chinese and English.
+
 ## [0.1.1] - 2026-08-18
 
 ### Added
