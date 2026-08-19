@@ -1,5 +1,19 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
+import {
+  access,
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { t } from './messages.js';
@@ -7,6 +21,9 @@ import type { Language, Problem, TestCase, TestResult } from './types.js';
 
 const resultMarker = '__LOCALALGO_RESULT__';
 const maxProcessOutputBytes = 1024 * 1024;
+const cppCacheVersion = '1';
+const cppCompileFlags = ['-std=c++17', '-O2', '-pipe'] as const;
+const maxCppCacheEntries = 64;
 
 function processErrorMessage(error: Error): string {
   return error.name === 'AbortError' ? t('runner.cancelled') : error.message;
@@ -317,6 +334,83 @@ async function runProcess(
   });
 }
 
+let cppCompilerFingerprintPromise: Promise<string> | undefined;
+
+function cppCompilerFingerprint(): Promise<string> {
+  cppCompilerFingerprintPromise ??= runProcess('g++', ['--version'], 3000)
+    .then((result) => result.stdout.split('\n').find((line) => line.trim())?.trim() ?? 'g++-unknown')
+    .catch(() => 'g++-unknown');
+  return cppCompilerFingerprintPromise;
+}
+
+async function cppCachePath(
+  cacheDirectory: string,
+  harness: string,
+  solutionPath: string,
+): Promise<string> {
+  const [solution, compiler] = await Promise.all([
+    readFile(solutionPath, 'utf8'),
+    cppCompilerFingerprint(),
+  ]);
+  const digest = createHash('sha256')
+    .update(cppCacheVersion)
+    .update('\0')
+    .update(process.platform)
+    .update('\0')
+    .update(process.arch)
+    .update('\0')
+    .update(compiler)
+    .update('\0')
+    .update(cppCompileFlags.join('\0'))
+    .update('\0')
+    .update(solution)
+    .update('\0')
+    .update(harness)
+    .digest('hex');
+  return path.join(cacheDirectory, digest);
+}
+
+async function readableExecutable(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath, constants.R_OK | constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function pruneCppCache(cacheDirectory: string): Promise<void> {
+  try {
+    const files = (await readdir(cacheDirectory))
+      .filter((file) => !file.endsWith('.tmp'));
+    if (files.length <= maxCppCacheEntries) return;
+    const entries = await Promise.all(files.map(async (file) => ({
+      file,
+      modifiedAt: (await stat(path.join(cacheDirectory, file))).mtimeMs,
+    })));
+    entries.sort((left, right) => right.modifiedAt - left.modifiedAt);
+    await Promise.all(entries.slice(maxCppCacheEntries).map(({ file }) =>
+      rm(path.join(cacheDirectory, file), { force: true })));
+  } catch {
+    // Cache maintenance is best-effort and must never block judging.
+  }
+}
+
+async function storeCppExecutable(source: string, destination: string): Promise<boolean> {
+  const temporary = `${destination}.${process.pid}-${randomUUID()}.tmp`;
+  try {
+    await mkdir(path.dirname(destination), { recursive: true });
+    await copyFile(source, temporary);
+    await chmod(temporary, 0o755);
+    await rename(temporary, destination);
+    await pruneCppCache(path.dirname(destination));
+    return true;
+  } catch {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    return await readableExecutable(destination);
+  }
+}
+
 function toCppLiteral(
   value: unknown,
   type: Problem['cppArgumentTypes'][number],
@@ -519,38 +613,51 @@ async function runCppTests(
   tests: TestCase[],
   timeoutMs: number,
   signal?: AbortSignal,
+  cacheDirectory?: string,
 ): Promise<TestResult[]> {
   const directory = await mkdtemp(path.join(tmpdir(), 'localalgo-cpp-'));
   const harnessPath = path.join(directory, 'harness.cpp');
-  const executablePath = path.join(directory, 'solution');
+  const temporaryExecutablePath = path.join(directory, 'solution');
   try {
-    await writeFile(harnessPath, buildCppHarness(problem, solutionPath, tests), 'utf8');
-    const compilation = await runProcess(
-      'g++',
-      ['-std=c++17', '-O2', '-pipe', harnessPath, '-o', executablePath],
-      15_000,
-      signal,
-    );
-    if (compilation.error || compilation.code !== 0) {
-      const cancelled = compilation.failureKind === 'cancelled';
-      const error = cancelled
-        ? compilation.error ?? t('runner.cancelled')
-        : compilation.error
-          ? compilation.errorSource === 'spawn'
-            ? t('runner.gppFailed', { error: compilation.error })
-            : compilation.error
-          : compilation.signal
-            ? t('runner.compileTerminated', { signal: compilation.signal })
-            : compilation.stderr.trim() || t('runner.compileFailed');
-      return [{
-        index: 0,
-        passed: false,
-        input: tests[0]?.input,
-        expected: tests[0]?.expected,
-        durationMs: 0,
-        error,
-        failureKind: cancelled ? 'cancelled' : 'compilation',
-      }];
+    const harness = buildCppHarness(problem, solutionPath, tests);
+    const cachedPath = cacheDirectory
+      ? await cppCachePath(cacheDirectory, harness, solutionPath)
+      : undefined;
+    let executablePath = cachedPath && await readableExecutable(cachedPath)
+      ? cachedPath
+      : undefined;
+    if (!executablePath) {
+      await writeFile(harnessPath, harness, 'utf8');
+      const compilation = await runProcess(
+        'g++',
+        [...cppCompileFlags, harnessPath, '-o', temporaryExecutablePath],
+        15_000,
+        signal,
+      );
+      if (compilation.error || compilation.code !== 0) {
+        const cancelled = compilation.failureKind === 'cancelled';
+        const error = cancelled
+          ? compilation.error ?? t('runner.cancelled')
+          : compilation.error
+            ? compilation.errorSource === 'spawn'
+              ? t('runner.gppFailed', { error: compilation.error })
+              : compilation.error
+            : compilation.signal
+              ? t('runner.compileTerminated', { signal: compilation.signal })
+              : compilation.stderr.trim() || t('runner.compileFailed');
+        return [{
+          index: 0,
+          passed: false,
+          input: tests[0]?.input,
+          expected: tests[0]?.expected,
+          durationMs: 0,
+          error,
+          failureKind: cancelled ? 'cancelled' : 'compilation',
+        }];
+      }
+      executablePath = cachedPath && await storeCppExecutable(temporaryExecutablePath, cachedPath)
+        ? cachedPath
+        : temporaryExecutablePath;
     }
     const execution = await runProcess(executablePath, [], timeoutMs, signal);
     if (execution.error || execution.code !== 0) {
@@ -620,11 +727,14 @@ export async function runTests(
   language: Language = 'python',
   timeoutMs = 2000,
   signal?: AbortSignal,
+  cppCacheDirectory?: string,
 ): Promise<TestResult[]> {
   const tests = includeHidden
     ? [...problem.sampleTests, ...problem.hiddenTests]
     : problem.sampleTests;
-  if (language === 'cpp') return await runCppTests(problem, solutionPath, tests, timeoutMs, signal);
+  if (language === 'cpp') {
+    return await runCppTests(problem, solutionPath, tests, timeoutMs, signal, cppCacheDirectory);
+  }
 
   const results: TestResult[] = [];
   for (const [index, testCase] of tests.entries()) {
@@ -652,10 +762,18 @@ export async function runCustomTest(
   language: Language = 'python',
   timeoutMs = 2000,
   signal?: AbortSignal,
+  cppCacheDirectory?: string,
 ): Promise<TestResult> {
   const testCase: TestCase = { input, expected: undefined };
   const result = language === 'cpp'
-    ? (await runCppTests(problem, solutionPath, [testCase], timeoutMs, signal))[0]
+    ? (await runCppTests(
+        problem,
+        solutionPath,
+        [testCase],
+        timeoutMs,
+        signal,
+        cppCacheDirectory,
+      ))[0]
     : await runPythonCase(problem, solutionPath, testCase, 0, timeoutMs, signal);
   if (!result) {
     return {

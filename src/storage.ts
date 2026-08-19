@@ -82,6 +82,7 @@ export class Storage {
   readonly legacyDataDirectory: string;
   readonly solutionsDirectory: string;
   readonly problemsDirectory: string;
+  readonly cppCacheDirectory: string;
   readonly stateFile: string;
   readonly stateBackupFile: string;
   recoveredFromBackup = false;
@@ -93,6 +94,7 @@ export class Storage {
     this.legacyDataDirectory = path.join(workspace, '.localcode');
     this.solutionsDirectory = path.join(workspace, 'solutions');
     this.problemsDirectory = path.join(this.dataDirectory, 'problems');
+    this.cppCacheDirectory = path.join(this.dataDirectory, 'cache', 'cpp');
     this.stateFile = path.join(this.dataDirectory, 'state.json');
     this.stateBackupFile = path.join(this.dataDirectory, 'state.json.bak');
   }
@@ -109,6 +111,7 @@ export class Storage {
       mkdir(this.dataDirectory, { recursive: true }),
       mkdir(this.solutionsDirectory, { recursive: true }),
       mkdir(this.problemsDirectory, { recursive: true }),
+      mkdir(this.cppCacheDirectory, { recursive: true }),
     ]);
   }
 

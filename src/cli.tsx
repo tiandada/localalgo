@@ -930,6 +930,7 @@ function App({ workspace, clearOutput }: AppProps) {
             activeLanguage,
             cliRunTimeoutMs,
             controller.signal,
+            storage.cppCacheDirectory,
           );
           const displayedResult = controller.signal.aborted
             ? { ...result, passed: false, error: t('run.cancelled'), failureKind: 'cancelled' as const }
@@ -963,6 +964,7 @@ function App({ workspace, clearOutput }: AppProps) {
             activeLanguage,
             cliRunTimeoutMs,
             controller.signal,
+            storage.cppCacheDirectory,
           );
           const displayedResults = controller.signal.aborted
             ? [{

@@ -7,6 +7,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Add `/locale [zh|en]` to switch the interface language; the choice is persisted in state schema version 3 (older state files still load).
+- Cache successful C++ builds with automatic invalidation for source, test, compiler, and platform changes.
 
 ### Changed
 

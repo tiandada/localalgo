@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -114,6 +114,49 @@ vector<int> two_sum(const vector<int>& nums, int target) {
   assert.ok(problem);
   const results = await runTests(problem, solution, true, 'cpp');
   assert.equal(results.every((result) => result.passed), true);
+});
+
+test('caches C++ builds and invalidates them for source or test changes', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'localcode-cache-test-'));
+  const solution = path.join(directory, 'solution.cpp');
+  const cache = path.join(directory, 'cache');
+  const source = `#include <unordered_map>
+#include <vector>
+using namespace std;
+vector<int> two_sum(const vector<int>& nums, int target) {
+    unordered_map<int, int> seen;
+    for (int i = 0; i < static_cast<int>(nums.size()); ++i) {
+        auto it = seen.find(target - nums[i]);
+        if (it != seen.end()) return {it->second, i};
+        seen[nums[i]] = i;
+    }
+    return {};
+}
+`;
+  await writeFile(solution, source);
+  const problem = findProblem('two-sum');
+  assert.ok(problem);
+
+  assert.equal((await runTests(problem, solution, false, 'cpp', 2000, undefined, cache))
+    .every((result) => result.passed), true);
+  const firstFiles = await readdir(cache);
+  assert.equal(firstFiles.length, 1);
+  const firstCacheFile = path.join(cache, firstFiles[0]!);
+  const firstModifiedAt = (await stat(firstCacheFile)).mtimeMs;
+
+  assert.equal((await runTests(problem, solution, false, 'cpp', 2000, undefined, cache))
+    .every((result) => result.passed), true);
+  assert.deepEqual(await readdir(cache), firstFiles);
+  assert.equal((await stat(firstCacheFile)).mtimeMs, firstModifiedAt);
+
+  assert.equal((await runTests(problem, solution, true, 'cpp', 2000, undefined, cache))
+    .every((result) => result.passed), true);
+  assert.equal((await readdir(cache)).length, 2);
+
+  await writeFile(solution, `${source}\n// cache invalidation\n`);
+  assert.equal((await runTests(problem, solution, false, 'cpp', 2000, undefined, cache))
+    .every((result) => result.passed), true);
+  assert.equal((await readdir(cache)).length, 3);
 });
 
 test('supports bool results in the C++ runner', async () => {
