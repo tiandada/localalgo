@@ -4,9 +4,15 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-08-20
+
 ### Added
 
 - Add a complete English README and language links between the Chinese and English documentation.
+
+### Changed
+
+- Document both npm and source installation in the Chinese and English READMEs.
 
 ## [0.1.3] - 2026-08-20
 
