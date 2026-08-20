@@ -487,6 +487,9 @@ function App({ workspace, clearOutput }: AppProps) {
           return true;
         });
         setCatalog([...builtInProblems, ...custom]);
+        for (const error of storage.problemLoadErrors) {
+          append('error', t('catalog.fileSkipped', { error }));
+        }
       } else {
         append('error', t('catalog.failed', { error: String(problemsResult.reason) }));
       }

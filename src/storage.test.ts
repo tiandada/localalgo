@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -169,8 +169,34 @@ test('imports and reloads a local problem pack', async () => {
   const imported = await storage.importProblemPack(source, new Set());
   assert.equal(imported[0]?.slug, 'fibonacci-number');
   assert.equal((await storage.loadProblems())[0]?.title, '斐波那契数');
+  await writeFile(path.join(storage.problemsDirectory, 'broken.json'), '{broken json');
+  assert.equal((await storage.loadProblems())[0]?.slug, 'fibonacci-number');
+  assert.equal(storage.problemLoadErrors.length, 1);
+  assert.match(storage.problemLoadErrors[0]!, /broken\.json/);
   await assert.rejects(
     storage.importProblemPack(source, new Set(['fibonacci-number'])),
     /题目已存在/,
   );
+});
+
+test('stores a multi-problem import as one atomic pack file', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'localalgo-storage-'));
+  const source = path.join(directory, 'pack.json');
+  const example = JSON.parse(
+    await readFile(new URL('../examples/problem-pack.json', import.meta.url), 'utf8'),
+  ) as { problems: Array<Record<string, unknown>> };
+  const first = example.problems[0]!;
+  const second = {
+    ...first,
+    slug: 'fibonacci-number-copy',
+    title: '斐波那契数副本',
+  };
+  await writeFile(source, JSON.stringify({ problems: [first, second] }));
+  const storage = new Storage(path.join(directory, 'workspace'));
+  const imported = await storage.importProblemPack(source, new Set());
+  assert.equal(imported.length, 2);
+  const files = (await readdir(storage.problemsDirectory))
+    .filter((file) => file.endsWith('.json'));
+  assert.equal(files.length, 1);
+  assert.equal((await storage.loadProblems()).length, 2);
 });

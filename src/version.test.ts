@@ -3,7 +3,7 @@ import test from 'node:test';
 import { packageVersion, wantsVersion } from './version.js';
 
 test('reads the current version from package metadata', () => {
-  assert.equal(packageVersion(), '0.1.2');
+  assert.equal(packageVersion(), '0.1.3');
 });
 
 test('recognizes long and short version flags', () => {

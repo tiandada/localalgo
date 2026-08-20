@@ -4,6 +4,19 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-20
+
+### Changed
+
+- Run each C++ test case in an isolated process while reusing a single compiled executable.
+- Store multi-problem imports as one atomic local pack file and continue loading other packs when one file is invalid.
+- Validate imported problem function names, required learning content, argument shapes, numeric ranges, and supported C++ input types before saving.
+
+### Fixed
+
+- Attribute C++ crashes and timeouts to the actual failing case and display that case's complete input.
+- Serialize control characters in C++ string results as valid JSON.
+
 ## [0.1.2] - 2026-08-19
 
 ### Added

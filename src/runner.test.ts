@@ -116,6 +116,115 @@ vector<int> two_sum(const vector<int>& nums, int target) {
   assert.equal(results.every((result) => result.passed), true);
 });
 
+test('isolates C++ cases in separate processes', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'localalgo-test-'));
+  const solution = path.join(directory, 'solution.cpp');
+  await writeFile(
+    solution,
+    `#include <vector>
+using namespace std;
+static int calls = 0;
+int binary_search(const vector<int>& nums, int target) {
+    ++calls;
+    if (calls != 1) return 999;
+    int left = 0, right = static_cast<int>(nums.size()) - 1;
+    while (left <= right) {
+        int middle = left + (right - left) / 2;
+        if (nums[middle] == target) return middle;
+        if (nums[middle] < target) left = middle + 1;
+        else right = middle - 1;
+    }
+    return -1;
+}
+`,
+  );
+  const problem = findProblem('binary-search');
+  assert.ok(problem);
+  const results = await runTests(problem, solution, false, 'cpp');
+  assert.equal(results.length, problem.sampleTests.length);
+  assert.equal(results.every((result) => result.passed), true);
+});
+
+test('attributes a later C++ runtime failure to its actual case', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'localalgo-test-'));
+  const solution = path.join(directory, 'solution.cpp');
+  await writeFile(
+    solution,
+    `#include <cstdlib>
+#include <vector>
+using namespace std;
+int binary_search(const vector<int>& nums, int target) {
+    if (target == 2) abort();
+    for (int index = 0; index < static_cast<int>(nums.size()); ++index) {
+        if (nums[index] == target) return index;
+    }
+    return -1;
+}
+`,
+  );
+  const problem = findProblem('binary-search');
+  assert.ok(problem);
+  const results = await runTests(problem, solution, false, 'cpp');
+  assert.equal(results.length, 2);
+  assert.equal(results[0]?.passed, true);
+  assert.equal(results[1]?.passed, false);
+  assert.deepEqual(results[1]?.input, problem.sampleTests[1]?.input);
+  assert.equal(results[1]?.failureKind, 'runtime');
+});
+
+test('attributes a later C++ timeout to its actual case', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'localalgo-test-'));
+  const solution = path.join(directory, 'solution.cpp');
+  await writeFile(
+    solution,
+    `#include <vector>
+using namespace std;
+int binary_search(const vector<int>& nums, int target) {
+    if (target == 2) while (true) {}
+    for (int index = 0; index < static_cast<int>(nums.size()); ++index) {
+        if (nums[index] == target) return index;
+    }
+    return -1;
+}
+`,
+  );
+  const problem = findProblem('binary-search');
+  assert.ok(problem);
+  const results = await runTests(problem, solution, false, 'cpp', 100);
+  assert.equal(results.length, 2);
+  assert.equal(results[0]?.passed, true);
+  assert.equal(results[1]?.passed, false);
+  assert.deepEqual(results[1]?.input, problem.sampleTests[1]?.input);
+  assert.match(results[1]?.error ?? '', /终止|terminated/i);
+});
+
+test('serializes C++ strings containing JSON control characters', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'localalgo-test-'));
+  const solution = path.join(directory, 'solution.cpp');
+  await writeFile(
+    solution,
+    `#include <string>
+#include <vector>
+using namespace std;
+string longest_common_prefix(const vector<string>&) {
+    return "line 1\\n\\\"quoted\\\"\\tend";
+}
+`,
+  );
+  const original = findProblem('longest-common-prefix');
+  assert.ok(original);
+  const expected = 'line 1\n"quoted"\tend';
+  const problem = {
+    ...original,
+    sampleTests: [{ input: [['ignored']], expected }],
+    hiddenTests: [],
+  };
+  const results = await runTests(problem, solution, false, 'cpp');
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.passed, true);
+  assert.equal(results[0]?.actual, expected);
+});
+
 test('caches C++ builds and invalidates them for source or test changes', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'localcode-cache-test-'));
   const solution = path.join(directory, 'solution.cpp');

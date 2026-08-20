@@ -1,4 +1,5 @@
-import { copyFile, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseProblemPack } from './problem-pack.js';
 import type { Language, Problem, ProgressState } from './types.js';
@@ -87,6 +88,7 @@ export class Storage {
   readonly stateBackupFile: string;
   recoveredFromBackup = false;
   migratedFromLegacyDirectory = false;
+  problemLoadErrors: string[] = [];
   private preserveBackupOnNextSave = false;
 
   constructor(readonly workspace = process.cwd()) {
@@ -161,16 +163,17 @@ export class Storage {
 
   async loadProblems(): Promise<Problem[]> {
     await this.ensureDirectories();
+    this.problemLoadErrors = [];
     const files = (await readdir(this.problemsDirectory))
       .filter((file) => file.endsWith('.json'))
       .sort();
     const problems: Problem[] = [];
     for (const file of files) {
-      const raw = await readFile(path.join(this.problemsDirectory, file), 'utf8');
       try {
+        const raw = await readFile(path.join(this.problemsDirectory, file), 'utf8');
         problems.push(...parseProblemPack(JSON.parse(raw)));
       } catch (error) {
-        throw new Error(`${file}：${(error as Error).message}`);
+        this.problemLoadErrors.push(`${file}：${(error as Error).message}`);
       }
     }
     return problems;
@@ -195,9 +198,21 @@ export class Storage {
         throw new Error(`题目文件已存在：${problem.slug}.json`);
       }
     }
-    for (const problem of problems) {
-      const destination = path.join(this.problemsDirectory, `${problem.slug}.json`);
-      await writeFile(destination, `${JSON.stringify([problem], null, 2)}\n`, { flag: 'wx' });
+    const serialized = `${JSON.stringify(problems, null, 2)}\n`;
+    const digest = createHash('sha256').update(serialized).digest('hex').slice(0, 12);
+    const fileName = `pack-${problems[0]!.slug}-${digest}.json`;
+    if (existingFiles.has(fileName)) throw new Error(`题包文件已存在：${fileName}`);
+    const destination = path.join(this.problemsDirectory, fileName);
+    const temporary = path.join(
+      this.problemsDirectory,
+      `.${fileName}.${process.pid}-${randomUUID()}.tmp`,
+    );
+    try {
+      await writeFile(temporary, serialized, { flag: 'wx' });
+      await rename(temporary, destination);
+    } catch (error) {
+      await rm(temporary, { force: true }).catch(() => undefined);
+      throw error;
     }
     return problems;
   }

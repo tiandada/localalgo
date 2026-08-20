@@ -1,4 +1,4 @@
-import type { Difficulty, Language, Problem, TestCase } from './types.js';
+import type { ArgumentType, Difficulty, Language, Problem, TestCase } from './types.js';
 
 const difficulties = new Set<Difficulty>(['easy', 'medium', 'hard']);
 const cppTypes = new Set<Problem['cppArgumentTypes'][number]>([
@@ -29,10 +29,76 @@ function stringAt(value: unknown, location: string): string {
 }
 
 function stringsAt(value: unknown, location: string): string[] {
-  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
-    throw new Error(`${location} 必须是字符串数组`);
+  if (!Array.isArray(value) || !value.every(
+    (item) => typeof item === 'string' && item.trim().length > 0,
+  )) {
+    throw new Error(`${location} 必须是非空字符串组成的数组`);
   }
   return value;
+}
+
+function nonEmptyStringsAt(value: unknown, location: string): string[] {
+  const strings = stringsAt(value, location);
+  if (strings.length === 0) throw new Error(`${location} 至少需要一项`);
+  return strings;
+}
+
+function validInt(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) &&
+    value >= -2_147_483_648 && value <= 2_147_483_647;
+}
+
+function validateArgument(value: unknown, type: ArgumentType, location: string): void {
+  if (type === 'int') {
+    if (!validInt(value)) throw new Error(`${location} 必须是 32 位整数`);
+    return;
+  }
+  if (type === 'long long') {
+    if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
+      throw new Error(`${location} 必须是 JavaScript 安全整数范围内的 long long`);
+    }
+    return;
+  }
+  if (type === 'double') {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new Error(`${location} 必须是有限数字`);
+    }
+    return;
+  }
+  if (type === 'bool') {
+    if (typeof value !== 'boolean') throw new Error(`${location} 必须是布尔值`);
+    return;
+  }
+  if (type === 'string') {
+    if (typeof value !== 'string') throw new Error(`${location} 必须是字符串`);
+    return;
+  }
+  if (type === 'vector<string>') {
+    if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+      throw new Error(`${location} 必须是字符串数组`);
+    }
+    return;
+  }
+  if (type === 'vector<vector<int>>') {
+    if (!Array.isArray(value) || !value.every(
+      (row) => Array.isArray(row) && row.every(validInt),
+    )) {
+      throw new Error(`${location} 必须是 32 位整数组成的二维数组`);
+    }
+    return;
+  }
+  if (type === 'TreeNode') {
+    if (value !== null && (!Array.isArray(value) || !value.every(
+      (item) => item === null || validInt(item),
+    ))) {
+      throw new Error(`${location} 必须是 null 或由 32 位整数和 null 组成的层序数组`);
+    }
+    return;
+  }
+  if (!Array.isArray(value) || !value.every(validInt)) {
+    const label = type === 'ListNode' ? '链表整数数组' : '32 位整数数组';
+    throw new Error(`${location} 必须是${label}`);
+  }
 }
 
 function testsAt(value: unknown, location: string): TestCase[] {
@@ -60,6 +126,7 @@ function problemAt(value: unknown, location: string): Problem {
   }
   const examplesSource = source.examples;
   if (!Array.isArray(examplesSource)) throw new Error(`${location}.examples 必须是数组`);
+  if (examplesSource.length === 0) throw new Error(`${location}.examples 至少需要一个示例`);
   const examples = examplesSource.map((item, index) => {
     const example = objectAt(item, `${location}.examples[${index}]`);
     return {
@@ -75,16 +142,20 @@ function problemAt(value: unknown, location: string): Problem {
   const sampleTests = testsAt(source.sampleTests, `${location}.sampleTests`);
   const hiddenTests = testsAt(source.hiddenTests, `${location}.hiddenTests`);
   if (sampleTests.length === 0) throw new Error(`${location}.sampleTests 至少需要一个样例`);
+  const functionName = stringAt(source.functionName, `${location}.functionName`);
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(functionName)) {
+    throw new Error(`${location}.functionName 必须是 Python 和 C++ 都可用的函数标识符`);
+  }
   const result: Problem = {
     slug,
     title: stringAt(source.title, `${location}.title`),
     difficulty: source.difficulty as Difficulty,
-    tags: stringsAt(source.tags, `${location}.tags`),
+    tags: nonEmptyStringsAt(source.tags, `${location}.tags`),
     summary: stringAt(source.summary, `${location}.summary`),
     constraints: stringsAt(source.constraints ?? [], `${location}.constraints`),
-    hints: stringsAt(source.hints, `${location}.hints`),
+    hints: nonEmptyStringsAt(source.hints, `${location}.hints`),
     examples,
-    functionName: stringAt(source.functionName, `${location}.functionName`),
+    functionName,
     cppArgumentTypes: cppArgumentTypes as Problem['cppArgumentTypes'],
     starters: {
       python: stringAt(starters.python, `${location}.starters.python`),
@@ -103,6 +174,18 @@ function problemAt(value: unknown, location: string): Problem {
     (test) => test.input.length !== result.cppArgumentTypes.length,
   )) {
     throw new Error(`${location}.cppArgumentTypes 数量必须与函数参数数量一致`);
+  }
+  for (const [testGroup, tests] of [
+    ['sampleTests', result.sampleTests],
+    ['hiddenTests', result.hiddenTests],
+  ] as const) {
+    tests.forEach((test, testIndex) => {
+      test.input.forEach((argument, argumentIndex) => validateArgument(
+        argument,
+        result.cppArgumentTypes[argumentIndex]!,
+        `${location}.${testGroup}[${testIndex}].input[${argumentIndex}]`,
+      ));
+    });
   }
   return result;
 }

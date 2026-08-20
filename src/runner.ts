@@ -467,20 +467,21 @@ function toCppLiteral(
 
 function buildCppHarness(problem: Problem, solutionPath: string, tests: TestCase[]): string {
   const cases = tests
-    .map((testCase) => {
+    .map((testCase, index) => {
       if (testCase.input.length !== problem.cppArgumentTypes.length) {
         throw new Error(t('runner.cppTypes', { slug: problem.slug }));
       }
       const args = testCase.input
         .map((value, index) => toCppLiteral(value, problem.cppArgumentTypes[index]!))
         .join(', ');
-      return `    {
+      return `    case ${index}: {
         auto started = std::chrono::steady_clock::now();
         auto value = ${problem.functionName}(${args});
         auto elapsed = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - started).count();
         std::cout << "${resultMarker}{\\\"value\\\":" << localalgo_json(value)
                   << ",\\\"durationMs\\\":" << elapsed << "}\\n";
+        return 0;
     }`;
     })
     .join('\n');
@@ -553,7 +554,26 @@ std::string localalgo_json(double value) {
 }
 std::string localalgo_json(const std::string& value) {
     std::ostringstream out;
-    out << std::quoted(value);
+    out << '"';
+    for (unsigned char character : value) {
+        switch (character) {
+            case '"': out << "\\\\\\\""; break;
+            case '\\\\': out << "\\\\\\\\"; break;
+            case '\\b': out << "\\\\b"; break;
+            case '\\f': out << "\\\\f"; break;
+            case '\\n': out << "\\\\n"; break;
+            case '\\r': out << "\\\\r"; break;
+            case '\\t': out << "\\\\t"; break;
+            default:
+                if (character < 0x20) {
+                    out << "\\\\u00" << std::hex << std::setw(2) << std::setfill('0')
+                        << static_cast<int>(character) << std::dec;
+                } else {
+                    out << static_cast<char>(character);
+                }
+        }
+    }
+    out << '"';
     return out.str();
 }
 template <typename T>
@@ -600,9 +620,18 @@ std::string localalgo_json(TreeNode* root) {
     return out + "]";
 }
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc != 2) return 2;
+    std::size_t selected_case = 0;
+    try {
+        selected_case = static_cast<std::size_t>(std::stoull(argv[1]));
+    } catch (...) {
+        return 2;
+    }
+    switch (selected_case) {
 ${cases}
-    return 0;
+        default: return 2;
+    }
 }
 `;
 }
@@ -659,28 +688,45 @@ async function runCppTests(
         ? cachedPath
         : temporaryExecutablePath;
     }
-    const execution = await runProcess(executablePath, [], timeoutMs, signal);
-    if (execution.error || execution.code !== 0) {
-      const cancelled = execution.failureKind === 'cancelled';
-      return [{
-        index: 0,
-        passed: false,
-        input: tests[0]?.input,
-        expected: tests[0]?.expected,
-        durationMs: timeoutMs,
-        error: execution.error ?? (execution.signal
-          ? t('runner.terminated', { signal: execution.signal })
-          : execution.stderr.trim() || t('runner.exitCode', { code: execution.code ?? 'unknown' })),
-        failureKind: cancelled ? 'cancelled' : 'runtime',
-      }];
-    }
-    const lines = execution.stdout
-      .split('\n')
-      .filter((line) => line.startsWith(resultMarker));
-    return tests.map((testCase, index) => {
-      const line = lines[index];
+    const results: TestResult[] = [];
+    for (const [index, testCase] of tests.entries()) {
+      if (signal?.aborted) {
+        results.push({
+          index,
+          passed: false,
+          input: testCase.input,
+          expected: testCase.expected,
+          durationMs: 0,
+          error: t('runner.cancelled'),
+          failureKind: 'cancelled',
+        });
+        break;
+      }
+      const startedAt = Date.now();
+      const execution = await runProcess(executablePath, [String(index)], timeoutMs, signal);
+      const wallDurationMs = Date.now() - startedAt;
+      if (execution.error || execution.code !== 0) {
+        const cancelled = execution.failureKind === 'cancelled';
+        results.push({
+          index,
+          passed: false,
+          input: testCase.input,
+          expected: testCase.expected,
+          durationMs: wallDurationMs,
+          error: execution.error ?? (execution.signal
+            ? t('runner.terminated', { signal: execution.signal })
+            : execution.stderr.trim() || t('runner.exitCode', { code: execution.code ?? 'unknown' })),
+          failureKind: cancelled ? 'cancelled' : 'runtime',
+        });
+        if (cancelled) break;
+        continue;
+      }
+      const line = execution.stdout
+        .split('\n')
+        .reverse()
+        .find((candidate) => candidate.startsWith(resultMarker));
       if (!line) {
-        return {
+        results.push({
           index,
           passed: false,
           input: testCase.input,
@@ -688,23 +734,24 @@ async function runCppTests(
           durationMs: 0,
           error: t('runner.noResult'),
           failureKind: 'runtime',
-        };
+        });
+        continue;
       }
       try {
         const payload = JSON.parse(line.slice(resultMarker.length)) as {
           value: unknown;
           durationMs: number;
         };
-        return {
+        results.push({
           index,
           passed: valuesEqual(payload.value, testCase.expected, problem.unorderedResult),
           input: testCase.input,
           expected: testCase.expected,
           actual: payload.value,
           durationMs: payload.durationMs,
-        };
+        });
       } catch (error) {
-        return {
+        results.push({
           index,
           passed: false,
           input: testCase.input,
@@ -712,9 +759,10 @@ async function runCppTests(
           durationMs: 0,
           error: t('runner.cppParseFailed', { error: String(error) }),
           failureKind: 'runtime',
-        };
+        });
       }
-    });
+    }
+    return results;
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
