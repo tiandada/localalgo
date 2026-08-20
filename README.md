@@ -1,5 +1,8 @@
 # LocalAlgo
 
+[简体中文](https://github.com/tiandada/localalgo/blob/main/README.md) |
+[English](https://github.com/tiandada/localalgo/blob/main/README.en.md)
+
 [![npm version](https://img.shields.io/npm/v/localalgo.svg)](https://www.npmjs.com/package/localalgo)
 [![CI](https://github.com/tiandada/localalgo/actions/workflows/ci.yml/badge.svg)](https://github.com/tiandada/localalgo/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/localalgo.svg)](LICENSE)
@@ -32,6 +35,8 @@
 
 ## 安装与运行
 
+### 从 npm 安装
+
 推荐直接从 npm 全局安装：
 
 ```bash
@@ -43,7 +48,9 @@ cd ~/practice/localalgo
 localalgo
 ```
 
-从源码运行：
+### 从源码安装
+
+克隆仓库、安装依赖并构建，然后通过 `npm link` 注册全局命令：
 
 ```bash
 git clone https://github.com/tiandada/localalgo.git

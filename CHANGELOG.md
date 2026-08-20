@@ -4,6 +4,10 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Add a complete English README and language links between the Chinese and English documentation.
+
 ## [0.1.3] - 2026-08-20
 
 ### Changed
