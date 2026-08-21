@@ -1,6 +1,6 @@
 {
   "name": "localalgo",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "An offline, conversation-first coding practice CLI",
   "license": "MIT",
   "author": "LocalAlgo contributors",
