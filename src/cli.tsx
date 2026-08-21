@@ -50,7 +50,8 @@ function solutionFileText(problem: Problem, language: Language): string {
       : []),
   ];
   const header = lines.map((line) => line ? `${prefix}${line}` : prefix.trimEnd()).join('\n');
-  return `${header}\n\n${problem.starters[language]}`;
+  const modeline = `${prefix}vim: set tabstop=4 shiftwidth=4 expandtab:`;
+  return `${header}\n\n${problem.starters[language]}\n${modeline}\n`;
 }
 
 function messageColor(kind: MessageKind): string | undefined {

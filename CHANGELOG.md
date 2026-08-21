@@ -4,6 +4,10 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Append a vim modeline to generated solution files so vim and Neovim use 4-space indentation that matches the starter templates instead of the default 8-column tabs.
+
 ## [0.1.4] - 2026-08-20
 
 ### Added
